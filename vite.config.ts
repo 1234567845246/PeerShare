@@ -1,4 +1,4 @@
-import { defineConfig ,type ViteDevServer} from 'vite'
+import { defineConfig, type ViteDevServer } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { buildSync } from 'esbuild';
 import electron from 'electron';
@@ -9,11 +9,18 @@ export let devPlugin = () => {
   return {
     name: "dev-plugin",
     configureServer(server: ViteDevServer) {
-     buildSync({
+      buildSync({
         entryPoints: ["./src/main/mainEntry.ts"],
         bundle: true,
         platform: "node",
         outfile: "./dist/mainEntry.js",
+        external: ["electron"],
+      });
+      buildSync({
+        entryPoints: ["./src/preload/preload.ts"],
+        bundle: true,
+        platform: "node",
+        outfile: "./dist/preload.js",
         external: ["electron"],
       });
       server.httpServer?.once("listening", () => {
@@ -36,5 +43,5 @@ export let devPlugin = () => {
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [devPlugin(),vue()],
+  plugins: [devPlugin(), vue()],
 })
