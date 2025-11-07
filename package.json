@@ -9,15 +9,20 @@
   },
   "dependencies": {
     "esbuild": "^0.25.12",
-    "vue": "^3.5.22"
+    "vue-i18n": "^11.1.12",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@types/node": "^24.6.0",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-vue": "^6.0.1",
     "@vue/tsconfig": "^0.8.1",
     "electron": "^39.0.0",
     "typescript": "~5.9.3",
     "vite": "^7.1.7",
-    "vue-tsc": "^3.1.0"
+    "vue-tsc": "^3.1.0",
+    "vue": "^3.5.22",
+    "vue-router": "^4.6.3",
+    "vue-i18n": "^11.1.12"
   }
 }

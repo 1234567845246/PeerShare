@@ -1,43 +1,56 @@
- body {
-   font-family: Arial, sans-serif;
-   margin: 20px;
- }
+:root {
+  --bg-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --bg-secondary: rgba(255, 255, 255, 0.95);
+  --bg-card: white;
+  --bg-header: linear-gradient(90deg, #4f6df5, #3a56e6);
+  --bg-button: #4f6df5;
+  --bg-button-hover: #3a56e6;
+  --bg-send: linear-gradient(135deg, #43cea2, #185a9d);
+  --bg-receive: linear-gradient(135deg, #ff7e5f, #feb47b);
+  --text-primary: #333;
+  --text-secondary: #666;
+  --text-light: white;
+  --text-muted: #999;
+  --border-color: #e9ecef;
+  --shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+  --shadow-light: 0 3px 10px rgba(0, 0, 0, 0.08);
+  --transition: all 0.3s ease;
+}
 
- .container {
-   display: flex;
-   gap: 20px;
- }
+[data-theme="dark"] {
+  --bg-primary: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+  --bg-secondary: rgba(30, 30, 40, 0.95);
+  --bg-card: #2d3748;
+  --bg-header: linear-gradient(90deg, #1e3a8a, #1e40af);
+  --bg-button: #3b82f6;
+  --bg-button-hover: #2563eb;
+  --bg-send: linear-gradient(135deg, #059669, #065f46);
+  --bg-receive: linear-gradient(135deg, #dc2626, #b91c1c);
+  --text-primary: #f7fafc;
+  --text-secondary: #e2e8f0;
+  --text-light: white;
+  --text-muted: #a0aec0;
+  --border-color: #4a5568;
+  --shadow: 0 15px 35px rgba(0, 0, 0, 0.4);
+  --shadow-light: 0 3px 10px rgba(0, 0, 0, 0.2);
+}
 
- .panel {
-   flex: 1;
-   border: 1px solid #ccc;
-   padding: 20px;
-   border-radius: 5px;
- }
 
- button {
-   margin: 5px;
-   padding: 8px 16px;
- }
 
- textarea {
-   width: 100%;
-   height: 100px;
-   margin: 10px 0;
- }
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  transition: var(--transition);
+}
 
- .status {
-   background: #f0f0f0;
-   padding: 10px;
-   margin: 10px 0;
-   border-radius: 3px;
- }
+body ,#app{
+  background: var(--bg-secondary);
+  height: 100vh;
+  width: 100vw;
+  padding: 0px;
+  margin: 0px;
+  color: var(--text-primary);
+}
 
- .log {
-   background: #000;
-   color: #0f0;
-   padding: 10px;
-   height: 200px;
-   overflow-y: scroll;
-   font-family: monospace;
- }

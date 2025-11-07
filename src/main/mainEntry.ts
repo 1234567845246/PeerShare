@@ -1,185 +1,139 @@
 // src\main\mainEntry.ts
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme } from 'electron'
+import { join } from 'path'
+import { FileTransferServer, FileTransferClient } from './fileTransferServer'
+import { type ServerTransferStatus } from '../common/types'
 
-
-
-// src/main.ts
-import { app, BrowserWindow, ipcMain } from 'electron';
-import { Server, Socket, createServer } from 'net';
-import { join } from 'path';
-
-class TCPSignalingServer {
-    private server: Server | null = null;
-    private clients: Map<string, Socket> = new Map();
+class Application {
     private mainWindow: BrowserWindow | null = null;
-
-    constructor(mainWindow: BrowserWindow) {
-        this.mainWindow = mainWindow;
-    }
-
-    startServer(port: number = 8080) {
-        this.server = createServer((socket: Socket) => {
-            const clientId = `${socket.remoteAddress}:${socket.remotePort}`;
-            console.log(`Client connected: ${clientId}`);
-
-            this.clients.set(clientId, socket);
-
-            socket.on('data', (data) => {
-                const message = data.toString();
-                console.log(`Received from ${clientId}:`, message);
-
-                // 转发到渲染进程
-                this.mainWindow?.webContents.send('tcp-message', {
-                    type: 'message',
-                    from: clientId,
-                    data: message
-                });
-
-                // 广播给其他客户端
-                this.broadcast(message, clientId);
-            });
-
-            socket.on('close', () => {
-                console.log(`Client disconnected: ${clientId}`);
-                this.clients.delete(clientId);
-                this.mainWindow?.webContents.send('tcp-message', {
-                    type: 'client-disconnected',
-                    from: clientId
-                });
-            });
-
-            socket.on('error', (err) => {
-                console.error(`Socket error for ${clientId}:`, err);
-            });
-
-        });
-
-        this.server.listen(port, () => {
-            console.log(`TCP signaling server listening on port ${port}`);
-            this.mainWindow?.webContents.send('tcp-status', {
-                type: 'server-started',
-                port
-            });
-        });
-
-        this.server.on('error', (err) => {
-            console.error('Server error:', err);
-            this.mainWindow?.webContents.send('tcp-error', {
-                type: 'server-error',
-                error: err.message
-            });
-        });
-    }
-
-    private broadcast(message: string, excludeClientId: string) {
-        for (const [clientId, socket] of this.clients) {
-            if (clientId !== excludeClientId && socket.writable) {
-                socket.write(message);
-            }
-        }
-    }
-
-    sendToClient(clientId: string, message: string) {
-        const socket = this.clients.get(clientId);
-        if (socket && socket.writable) {
-            socket.write(message);
-            return true;
-        }
-        return false;
-    }
-
-    stopServer() {
-        if (this.server) {
-            this.server.close();
-            this.server = null;
-            this.clients.clear();
-        }
-    }
-}
-
-class TCPClient {
-    private client: Socket | null = null;
-    private mainWindow: BrowserWindow | null = null;
-    private isConnected: boolean = false;
-
-    constructor(mainWindow: BrowserWindow) {
-        this.mainWindow = mainWindow;
-    }
-
-    connect(host: string, port: number) {
-        this.client = new Socket();
-
-        this.client.connect(port, host, () => {
-            console.log(`Connected to server ${host}:${port}`);
-            this.isConnected = true;
-            this.mainWindow?.webContents.send('tcp-status', {
-                type: 'client-connected',
-                host,
-                port
-            });
-        });
-
-        this.client.on('data', (data) => {
-            const message = data.toString();
-            console.log('Received from server:', message);
-
-            this.mainWindow?.webContents.send('tcp-message', {
-                type: 'message',
-                from: 'server',
-                data: message
-            });
-        });
-
-        this.client.on('close', () => {
-            console.log('Connection closed');
-            this.isConnected = false;
-            this.mainWindow?.webContents.send('tcp-status', {
-                type: 'client-disconnected'
-            });
-        });
-
-        this.client.on('error', (err) => {
-            console.error('Client error:', err);
-            this.mainWindow?.webContents.send('tcp-error', {
-                type: 'client-error',
-                error: err.message
-            });
-        });
-    }
-
-    send(message: string) {
-        if (this.client && this.isConnected) {
-            this.client.write(message);
-            return true;
-        }
-        return false;
-    }
-
-    disconnect() {
-        if (this.client) {
-            this.client.destroy();
-            this.client = null;
-            this.isConnected = false;
-        }
-    }
-}
-
-class MainProcess {
-    private mainWindow: BrowserWindow | null = null;
-    private tcpServer: TCPSignalingServer | null = null;
-    private tcpClient: TCPClient | null = null;
-    private mode: 'server' | 'client' | null = null;
+    private fileServer: FileTransferServer | null = null;
+    private fileClient: FileTransferClient | null = null;
 
     constructor() {
-        this.createWindow();
+        this.createmainWindow();
         this.setupIPC();
     }
 
-    private createWindow() {
+    private setupIPC() {
+        // 文件传输服务器控制
+        ipcMain.handle('start-file-server', async (_, port: number) => {
+            try {
+                if (this.fileServer) {
+                    return { success: false, message: 'File server is already running' };
+                }
+                
+                this.fileServer = new FileTransferServer(port);
+                
+                // 设置服务端进度回调，将进度信息发送到渲染进程
+                this.fileServer.setServerProgressCallback((status: ServerTransferStatus) => {
+                    this.mainWindow?.webContents.send('file-transfer-status',status);
+                });
+                
+                return { success: true, message: `File server started on port ${port}` };
+            } catch (error: any) {
+                return { success: false, message: error.message };
+            }
+        });
+
+        ipcMain.handle('stop-file-server', async () => {
+            try {
+                if (!this.fileServer) {
+                    return { success: false, message: 'File server is not running' };
+                }
+                
+                this.fileServer.close();
+                this.fileServer = null;
+                return { success: true, message: 'File server stopped' };
+            } catch (error: any) {
+                return { success: false, message: error.message };
+            }
+        });
+
+        // 文件传输客户端控制
+        ipcMain.handle('connect-file-client', async (_, url: string) => {
+            try {
+                if (this.fileClient) {
+                    return { success: false, message: 'File client is already connected' };
+                }
+                
+                this.fileClient = new FileTransferClient(url);
+                await this.fileClient.connect();
+                return { success: true, message: `Connected to file server at ${url}` };
+            } catch (error: any) {
+                return { success: false, message: error.message };
+            }
+        });
+
+        ipcMain.handle('disconnect-file-client', async () => {
+            try {
+                if (!this.fileClient) {
+                    return { success: false, message: 'File client is not connected' };
+                }
+                
+                this.fileClient.disconnect();
+                this.fileClient = null;
+                return { success: true, message: 'Disconnected from file server' };
+            } catch (error: any) {
+                return { success: false, message: error.message };
+            }
+        });
+
+        // 文件发送
+        ipcMain.handle('send-file', async (_, filePath: string) => {
+            try {
+                if (!this.fileClient) {
+                    return { success: false, message: 'File client is not connected' };
+                }
+                
+                // 发送状态更新到渲染进程
+                this.mainWindow?.webContents.send('file-transfer-status', {
+                    type: 'transfer-start',
+                    message: `Starting to send file: ${filePath}`
+                });
+                
+                // 设置进度回调函数
+                this.fileClient.setProgressCallback((progress: number) => {
+                    this.mainWindow?.webContents.send('file-transfer-status', {
+                        type: 'transfer-progress',
+                        message: `Transfer progress: ${progress}%`,
+                        progress: progress
+                    });
+                });
+                
+                await this.fileClient.sendFile(filePath);
+                
+                this.mainWindow?.webContents.send('file-transfer-status', {
+                    type: 'transfer-complete',
+                    message: 'File transfer completed successfully'
+                });
+                
+                return { success: true, message: 'File sent successfully' };
+            } catch (error: any) {
+                this.mainWindow?.webContents.send('file-transfer-error', {
+                    message: error.message
+                });
+                return { success: false, message: error.message };
+            }
+        });
+
+
+        ipcMain.on('set-theme', (_, theme: 'dark' | 'light') => {
+            nativeTheme.themeSource = theme;
+        })
+
+        ipcMain.on('open-dev-tools', () => {
+            this.mainWindow?.webContents.openDevTools({ mode: 'undocked' });
+        })
+    }
+
+    private createmainWindow() {
         this.mainWindow = new BrowserWindow({
-            minHeight: 1000,
-            minWidth: 1250,
-            width: 1450,
-            height: 1200,
+            minHeight: 640,
+            minWidth: 800,
+            width: 1000,
+            height: 800,
+            title:'PeerShare',
+            icon :nativeImage.createFromPath(join(__dirname, 'icon.png')),
             webPreferences: {
                 preload: join(__dirname, 'preload.js'),
                 nodeIntegration: false,
@@ -192,70 +146,21 @@ class MainProcess {
                 disableHtmlFullscreenWindowResize: true,
             },
         });
-        this.mainWindow.webContents.openDevTools({ mode: "undocked" });
-        this.mainWindow.loadURL(process.argv[2] as string);
-    }
-
-    private setupIPC() {
-        // TCP 服务器控制
-        ipcMain.handle('start-server', async (_, port: number) => {
-            this.mode = 'server';
-            this.tcpServer = new TCPSignalingServer(this.mainWindow!);
-            this.tcpServer.startServer(port);
-            return { success: true };
-        });
-
-        ipcMain.handle('stop-server', async () => {
-            if (this.tcpServer) {
-                this.tcpServer.stopServer();
-                this.tcpServer = null;
-            }
-            return { success: true };
-        });
-
-        // TCP 客户端控制
-        ipcMain.handle('connect-client', async (_, host: string, port: number) => {
-            this.mode = 'client';
-            this.tcpClient = new TCPClient(this.mainWindow!);
-            this.tcpClient.connect(host, port);
-            return { success: true };
-        });
-
-        ipcMain.handle('disconnect-client', async () => {
-            if (this.tcpClient) {
-                this.tcpClient.disconnect();
-                this.tcpClient = null;
-            }
-            return { success: true };
-        });
-
-        // 发送消息
-        ipcMain.handle('send-message', async (_, message: string) => {
-            if (this.mode === 'server' && this.tcpServer) {
-                // 服务器模式广播消息
-                // 这里简化处理，实际应该指定客户端
-                return { success: true };
-            } else if (this.mode === 'client' && this.tcpClient) {
-                return { success: this.tcpClient.send(message) };
-            }
-            return { success: false };
-        });
+        
+        this.mainWindow.on('closed', () => {
+            this.mainWindow = null;
+        })
+        Menu.setApplicationMenu(null);
+        
+        if (process.argv[2]) {
+            // this.mainWindow.webContents.openDevTools({ mode: 'undocked' });
+            this.mainWindow.loadURL(process.argv[2]);
+        } else {
+            this.mainWindow.loadFile(join(__dirname, 'index.html'));
+        }
     }
 }
 
-// 启动应用
 app.whenReady().then(() => {
-    new MainProcess();
-
-    app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) {
-            new MainProcess();
-        }
-    });
-});
-
-app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') {
-        app.quit();
-    }
-});
+    new Application();
+})

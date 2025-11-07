@@ -4,6 +4,8 @@ import { buildSync } from 'esbuild';
 import electron from 'electron';
 import type { AddressInfo } from 'node:net'
 import { spawn } from 'node:child_process';
+import { cpSync } from 'node:fs';
+import { join } from 'node:path';
 
 export let devPlugin = () => {
   return {
@@ -22,6 +24,12 @@ export let devPlugin = () => {
         platform: "node",
         outfile: "./dist/preload.js",
         external: ["electron"],
+      });
+
+      cpSync(join(__dirname, 'public'), join(__dirname, 'dist'), {
+        recursive: true,
+        errorOnExist: false,
+        force: true
       });
       server.httpServer?.once("listening", () => {
         const addressInfo = server.httpServer?.address() as AddressInfo
