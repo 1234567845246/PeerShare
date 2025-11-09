@@ -1,25 +1,20 @@
 <template>
   <div class="send-container">
-   
+
     <div class="send-page">
       <h2 class="section-title">
         <i class="fas fa-paper-plane"></i>
         发送文件
       </h2>
-      
-      
+
+
       <!-- 客户端控制 -->
       <div class="control-section">
         <h3>连接接收方</h3>
         <div class="control-group">
           <label for="clientUrl">地址:</label>
-          <input 
-            type="text" 
-            id="clientUrl" 
-            v-model="clientUrl" 
-            :disabled="isClientConnected"
-            placeholder="例如: ws://192.168.1.100:8080"
-          />
+          <input type="text" id="clientUrl" v-model="clientUrl" :disabled="isClientConnected"
+            placeholder="例如: ws://192.168.1.100:8080" />
           <button @click="connectClient" :disabled="isClientConnected">
             {{ isClientConnected ? '已连接' : '连接' }}
           </button>
@@ -28,9 +23,10 @@
           </button>
         </div>
       </div>
-      
+
       <div class="send-section">
-        <div class="file-selector" :class="{ active: isFileSelected }" @click="selectFile" @drop="handleFileDrop" @dragover="handleFileDragOver">
+        <div class="file-selector" :class="{ active: isFileSelected }" @click="selectFile" @drop="handleFileDrop"
+          @dragover="handleFileDragOver">
           <div class="file-icon">
             <i class="fas fa-cloud-upload-alt"></i>
           </div>
@@ -46,7 +42,10 @@
             </div>
             <div class="file-details">
               <div class="file-name">{{ selectedFile.name }}</div>
-              <div class="file-size">{{ formatFileSize(selectedFile.size) }}</div>
+              <div class="file-size-rate">
+                <div class="file-size">{{ formatFileSize(selectedFile.size) }}</div>
+                <div class="file-rate">{{ formatRate(transferRate) }}</div>
+              </div>
             </div>
           </div>
 
@@ -61,10 +60,16 @@
           </div>
 
           <div class="action-buttons-row">
-            <button class="btn primary" @click="sendFile" :disabled="isSending || !isClientConnected">
-              {{ isSending ? '发送中...' : '开始发送' }}
+            <button class="btn primary" @click="sendFile" :disabled="isSending || !isClientConnected || isPaused">
+              {{ isSending ? (isPaused ? '已暂停' : '发送中...') : '开始发送' }}
+            </button>
+            <button class="btn secondary" @click="pauseResumeFile" :disabled="!isSending || isCompleted" v-if="isSending">
+              <i class="fas fa-pause" v-if="!isPaused"></i>
+              <i class="fas fa-play" v-if="isPaused"></i>
+              {{ isPaused ? '恢复' : '暂停' }}
             </button>
             <button class="btn secondary" @click="cancelSend" :disabled="!isSending">
+              <i class="fas fa-times"></i>
               取消
             </button>
           </div>
@@ -76,6 +81,8 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import { formatFileSize, formatRate } from '../../common/tools'
+import type { ClientTransferStatus } from '../../common/types'
 
 // 组件引用
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -84,21 +91,14 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const selectedFile = ref<File | null>(null)
 const isFileSelected = ref(false)
 const isSending = ref(false)
+const isPaused = ref(false)
+const isCompleted = ref(false)
 const progress = ref(0)
 const progressMessage = ref('准备发送')
 const isClientConnected = ref(false)
 const clientUrl = ref('ws://localhost:8080')
-
-// 格式化文件大小
-function formatFileSize(bytes: number): string {
-  if (bytes === 0) return '0 Bytes'
-  
-  const k = 1024
-  const sizes = ['Bytes', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-}
+const transferRate = ref(0) // 添加传输速率
+let filePath = '' // 存储文件路径
 
 // 选择文件
 const selectFile = () => {
@@ -115,6 +115,9 @@ const handleFileSelect = (event: Event) => {
     if (file) {
       selectedFile.value = file
       isFileSelected.value = true
+      isCompleted.value = false
+      progress.value = 0
+      progressMessage.value = '准备发送'
     }
   }
 }
@@ -126,14 +129,15 @@ const handleFileDrop = (event: DragEvent) => {
   if (file) {
     selectedFile.value = file
     isFileSelected.value = true
+    isCompleted.value = false
+    progress.value = 0
+    progressMessage.value = '准备发送'
   }
 }
 
 const handleFileDragOver = (event: DragEvent) => {
   event.preventDefault();
 }
-
-
 
 // 连接客户端
 const connectClient = async () => {
@@ -178,18 +182,21 @@ const sendFile = async () => {
   }
 
   isSending.value = true
+  isPaused.value = false
+  isCompleted.value = false
   progress.value = 0
   progressMessage.value = '准备发送文件...'
 
   try {
     // 获取文件路径
-    const filePath = window.electronAPI.getPathForFile(selectedFile.value)
-    
+    filePath = window.electronAPI.getPathForFile(selectedFile.value)
+
     // 发送文件
     const result = await window.electronAPI.sendFile(filePath)
-    
+
     if (result.success) {
       progressMessage.value = `文件发送成功: ${result.message}`
+      isCompleted.value = true
     } else {
       progressMessage.value = `文件发送失败: ${result.message}`
     }
@@ -201,30 +208,96 @@ const sendFile = async () => {
   }
 }
 
+// 暂停/恢复文件传输
+const pauseResumeFile = async () => {
+  if (!selectedFile.value) {
+    progressMessage.value = '请先选择文件'
+    return
+  }
+
+  if (isPaused.value) {
+    // 恢复传输
+    try {
+      const result = await window.electronAPI.resumeFileTransfer(selectedFile.value.name)
+      if (result.success) {
+        isPaused.value = false
+        progressMessage.value = '传输已恢复'
+      } else {
+        progressMessage.value = `恢复失败: ${result.message}`
+      }
+    } catch (error: any) {
+      progressMessage.value = `恢复错误: ${error.message || '未知错误'}`
+    }
+  } else {
+    // 暂停传输
+    try {
+      const result = await window.electronAPI.pauseFileTransfer(selectedFile.value.name)
+      if (result.success) {
+        isPaused.value = true
+        progressMessage.value = '传输已暂停'
+      } else {
+        progressMessage.value = `暂停失败: ${result.message}`
+      }
+    } catch (error: any) {
+      progressMessage.value = `暂停错误: ${error.message || '未知错误'}`
+    }
+  }
+}
+
 // 取消发送
-const cancelSend = () => {
-  isSending.value = false
-  progress.value = 0
-  progressMessage.value = '已取消发送'
+const cancelSend = async () => {
+  try {
+    const result = await window.electronAPI.cancelFileTransfer(selectedFile.value?.name || '')
+    if (result.success) {
+      isSending.value = false
+      isPaused.value = false
+      progress.value = 0
+      progressMessage.value = '已取消发送'
+    } else {
+      progressMessage.value = `取消失败: ${result.message}`
+    }
+  } catch (error: any) {
+    progressMessage.value = `取消错误: ${error.message || '未知错误'}`
+  }
 }
 
 // 处理文件传输状态更新
-const handleFileTransferStatus = (data: { 
-  type: string; 
-  message: string; 
-  progress?: number;
-  filename?: string;
-  clientId?: string;
-}) => {
-  if (data.progress !== undefined) {
-    progress.value = data.progress
+const handleFileTransferStatus = (data: ClientTransferStatus) => {
+  if (data.type === 'transfer-progress') {
+    progress.value = data.progress;
+    // 更新传输速率
+    if ('transferRate' in data && data.transferRate) {
+      transferRate.value = data.transferRate;
+      // 在消息中显示传输速率
+      progressMessage.value = `传输进度: ${data.progress}% (${formatRate(data.transferRate)} KB/s)`;
+    }
   }
-  
-  progressMessage.value = data.message
-  
+
+  if (data.type === 'transfer-pause') {
+    isPaused.value = true;
+    progressMessage.value = data.message || '传输已暂停';
+  }
+
+  if (data.type === 'transfer-resume') {
+    isPaused.value = false;
+    progressMessage.value = data.message || '传输已恢复';
+  }
+
+  if (data.type === 'transfer-cancel') {
+    isSending.value = false;
+    isPaused.value = false;
+    progressMessage.value = data.message || '传输已取消';
+  }
+
+  if (data.message) {
+    progressMessage.value = data.message;
+  }
+
   // 如果是完成状态，重置发送状态
   if (data.type === 'transfer-complete') {
     isSending.value = false
+    isCompleted.value = true
+    transferRate.value = 0;
   }
 }
 
@@ -236,13 +309,13 @@ const handleFileTransferError = (error: { message: string }) => {
 
 // 组件挂载时设置事件监听器
 onMounted(() => {
-  window.electronAPI.onFileTransferStatus(handleFileTransferStatus)
-  window.electronAPI.onFileTransferError(handleFileTransferError)
+  window.electronAPI.onClientFileTransferStatus(handleFileTransferStatus)
+  window.electronAPI.onClientFileTransferError(handleFileTransferError)
 })
 
 // 组件卸载时移除事件监听器
 onUnmounted(() => {
-  window.electronAPI.removeAllFileTransferListeners()
+  window.electronAPI.removeAllClientFileTransferListeners()
 })
 </script>
 
@@ -411,7 +484,14 @@ onUnmounted(() => {
   color: var(--text-primary);
 }
 
-.file-size {
+.file-size-rate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.file-size,
+.file-rate {
   color: var(--text-secondary);
   font-size: 14px;
 }
@@ -463,7 +543,7 @@ onUnmounted(() => {
   color: var(--text-light);
 }
 
-.btn.primary:hover {
+.btn.primary:not(:disabled):hover {
   background: var(--bg-button-hover);
 }
 
@@ -472,7 +552,7 @@ onUnmounted(() => {
   color: var(--text-light);
 }
 
-.btn.secondary:hover {
+.btn.secondary:not(:disabled):hover {
   background: var(--text-secondary);
 }
 
@@ -488,7 +568,7 @@ onUnmounted(() => {
     flex-direction: column;
     align-items: stretch;
   }
-  
+
   .control-group input,
   .control-group button {
     width: 100%;

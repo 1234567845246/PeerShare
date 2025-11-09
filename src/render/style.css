@@ -51,6 +51,7 @@ body ,#app{
   width: 100vw;
   padding: 0px;
   margin: 0px;
+  user-select: none;
   color: var(--text-primary);
 }
 

@@ -10,7 +10,7 @@ const routes = [
   },
   {
     path: '/send',
-    component: SendPage
+    component: SendPage,
   },
   {
     path: '/receive',

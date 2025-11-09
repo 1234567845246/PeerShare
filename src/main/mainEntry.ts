@@ -3,6 +3,7 @@ import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme } from 'ele
 import { join } from 'path'
 import { FileTransferServer, FileTransferClient } from './fileTransferServer'
 import { type ServerTransferStatus } from '../common/types'
+import { formatRate } from '../common/tools';
 
 class Application {
     private mainWindow: BrowserWindow | null = null;
@@ -26,7 +27,7 @@ class Application {
                 
                 // 设置服务端进度回调，将进度信息发送到渲染进程
                 this.fileServer.setServerProgressCallback((status: ServerTransferStatus) => {
-                    this.mainWindow?.webContents.send('file-transfer-status',status);
+                    this.mainWindow?.webContents.send('receive-file-transfer-status', status);
                 });
                 
                 return { success: true, message: `File server started on port ${port}` };
@@ -60,7 +61,16 @@ class Application {
                 await this.fileClient.connect();
                 return { success: true, message: `Connected to file server at ${url}` };
             } catch (error: any) {
-                return { success: false, message: error.message };
+                // 确保在连接失败时清理 fileClient 实例
+                if (this.fileClient) {
+                    try {
+                        this.fileClient.disconnect();
+                    } catch (disconnectError) {
+                        // 忽略断开连接时的错误
+                    }
+                    this.fileClient = null;
+                }
+                return { success: false, message: error.message || 'Failed to connect to file server' };
             }
         });
 
@@ -74,7 +84,9 @@ class Application {
                 this.fileClient = null;
                 return { success: true, message: 'Disconnected from file server' };
             } catch (error: any) {
-                return { success: false, message: error.message };
+                // 即使出现错误也确保清理 fileClient
+                this.fileClient = null;
+                return { success: false, message: error.message || 'Error disconnecting from file server' };
             }
         });
 
@@ -85,37 +97,198 @@ class Application {
                     return { success: false, message: 'File client is not connected' };
                 }
                 
+                // 检查 WebSocket 连接状态
+                // 注意：这里需要访问 FileTransferClient 的私有属性，所以我们使用类型断言
+                const clientWs = (this.fileClient as any).ws;
+                if (!clientWs || clientWs.readyState !== WebSocket.OPEN) {
+                    // 清理无效的客户端连接
+                    if (this.fileClient) {
+                        try {
+                            this.fileClient.disconnect();
+                        } catch (disconnectError) {
+                            // 忽略断开连接时的错误
+                        }
+                        this.fileClient = null;
+                    }
+                    return { success: false, message: 'File client connection is not open' };
+                }
+                
                 // 发送状态更新到渲染进程
-                this.mainWindow?.webContents.send('file-transfer-status', {
+                this.mainWindow?.webContents.send('send-file-transfer-status', {
                     type: 'transfer-start',
                     message: `Starting to send file: ${filePath}`
                 });
                 
                 // 设置进度回调函数
                 this.fileClient.setProgressCallback((progress: number) => {
-                    this.mainWindow?.webContents.send('file-transfer-status', {
+                    // 计算传输速率
+                    const transferRate = this.fileClient ? (this.fileClient as any).transferRate || 0 : 0;
+                    
+                    this.mainWindow?.webContents.send('send-file-transfer-status', {
                         type: 'transfer-progress',
-                        message: `Transfer progress: ${progress}%`,
-                        progress: progress
+                        message: `Transfer progress: ${progress}%` + (transferRate > 0 ? ` ${formatRate(transferRate)}` : ''),
+                        progress: progress,
+                        transferRate: transferRate
                     });
                 });
                 
                 await this.fileClient.sendFile(filePath);
                 
-                this.mainWindow?.webContents.send('file-transfer-status', {
+                this.mainWindow?.webContents.send('send-file-transfer-status', {
                     type: 'transfer-complete',
                     message: 'File transfer completed successfully'
                 });
                 
                 return { success: true, message: 'File sent successfully' };
             } catch (error: any) {
-                this.mainWindow?.webContents.send('file-transfer-error', {
-                    message: error.message
+                // 确保在发送失败时清理 fileClient
+                if (this.fileClient) {
+                    try {
+                        this.fileClient.disconnect();
+                    } catch (disconnectError) {
+                        // 忽略断开连接时的错误
+                    }
+                    this.fileClient = null;
+                }
+                
+                this.mainWindow?.webContents.send('send-file-transfer-error', {
+                    message: error.message || 'Error sending file'
                 });
-                return { success: false, message: error.message };
+                return { success: false, message: error.message || 'Error sending file' };
             }
         });
 
+        // 暂停文件传输（从发送端发起）
+        ipcMain.handle('pause-file-transfer', async (_, filename: string) => {
+            try {
+                if (!this.fileClient) {
+                    return { success: false, message: 'File client is not connected' };
+                }
+                
+                // 检查 WebSocket 连接状态
+                const clientWs = (this.fileClient as any).ws;
+                if (!clientWs || clientWs.readyState !== WebSocket.OPEN) {
+                    return { success: false, message: 'File client connection is not open' };
+                }
+                
+                // 调用客户端的暂停方法
+                this.fileClient.pauseTransfer(filename);
+                
+                this.mainWindow?.webContents.send('send-file-transfer-status', {
+                    type: 'transfer-pause',
+                    filename: filename,
+                    message: 'File transfer paused'
+                });
+                
+                return { success: true, message: 'File transfer paused' };
+            } catch (error: any) {
+                return { success: false, message: error.message || 'Error pausing file transfer' };
+            }
+        });
+
+        // 恢复文件传输（从发送端发起）
+        ipcMain.handle('resume-file-transfer', async (_, filename: string) => {
+            try {
+                if (!this.fileClient) {
+                    return { success: false, message: 'File client is not connected' };
+                }
+                
+                // 检查 WebSocket 连接状态
+                const clientWs = (this.fileClient as any).ws;
+                if (!clientWs || clientWs.readyState !== WebSocket.OPEN) {
+                    return { success: false, message: 'File client connection is not open' };
+                }
+                
+                // 调用客户端的恢复方法
+                this.fileClient.resumeTransfer(filename);
+                
+                this.mainWindow?.webContents.send('send-file-transfer-status', {
+                    type: 'transfer-resume',
+                    filename: filename,
+                    message: 'File transfer resumed'
+                });
+                
+                return { success: true, message: 'File transfer resumed' };
+            } catch (error: any) {
+                return { success: false, message: error.message || 'Error resuming file transfer' };
+            }
+        });
+
+        // 取消文件传输（从发送端发起）
+        ipcMain.handle('cancel-file-transfer', async (_, filename: string) => {
+            try {
+                if (!this.fileClient) {
+                    return { success: false, message: 'File client is not connected' };
+                }
+                
+                // 检查 WebSocket 连接状态
+                const clientWs = (this.fileClient as any).ws;
+                if (!clientWs || clientWs.readyState !== WebSocket.OPEN) {
+                    return { success: false, message: 'File client connection is not open' };
+                }
+                
+                // 调用客户端的取消方法
+                this.fileClient.cancelTransfer(filename);
+                
+                this.mainWindow?.webContents.send('send-file-transfer-status', {
+                    type: 'transfer-cancel',
+                    filename: filename,
+                    message: 'File transfer cancelled'
+                });
+                
+                return { success: true, message: 'File transfer cancelled' };
+            } catch (error: any) {
+                return { success: false, message: error.message || 'Error cancelling file transfer' };
+            }
+        });
+
+        // 暂停文件传输（从接收端发起）
+        ipcMain.handle('pause-file-transfer-from-server', async (_, filename: string) => {
+            try {
+                if (!this.fileServer) {
+                    return { success: false, message: 'File server is not running' };
+                }
+                
+                // 让服务器向客户端发送暂停消息
+                this.fileServer.sendPauseToClient(filename);
+                
+                return { success: true, message: 'Pause request sent to client' };
+            } catch (error: any) {
+                return { success: false, message: error.message || 'Error sending pause request to client' };
+            }
+        });
+
+        // 恢复文件传输（从接收端发起）
+        ipcMain.handle('resume-file-transfer-from-server', async (_, filename: string) => {
+            try {
+                if (!this.fileServer) {
+                    return { success: false, message: 'File server is not running' };
+                }
+                
+                // 让服务器向客户端发送恢复消息
+                this.fileServer.sendResumeToClient(filename);
+                
+                return { success: true, message: 'Resume request sent to client' };
+            } catch (error: any) {
+                return { success: false, message: error.message || 'Error sending resume request to client' };
+            }
+        });
+
+        // 取消文件传输（从接收端发起）
+        ipcMain.handle('cancel-file-transfer-from-server', async (_, filename: string) => {
+            try {
+                if (!this.fileServer) {
+                    return { success: false, message: 'File server is not running' };
+                }
+                
+                // 让服务器向客户端发送取消消息
+                this.fileServer.sendCancelToClient(filename);
+                
+                return { success: true, message: 'Cancel request sent to client' };
+            } catch (error: any) {
+                return { success: false, message: error.message || 'Error sending cancel request to client' };
+            }
+        });
 
         ipcMain.on('set-theme', (_, theme: 'dark' | 'light') => {
             nativeTheme.themeSource = theme;

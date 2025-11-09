@@ -29,13 +29,38 @@
               </div>
               <div>
                 <div class="transfer-name">{{ file.name }}</div>
-                <div class="transfer-size">{{ formatFileSize(file.size) }}</div>
-                <div class="transfer-progress">{{ file.progress }} %</div>
+                <div class="transfer-size-rate">
+                  <div class="transfer-size">{{ formatFileSize(file.size) }}</div>
+                  <div class="transfer-rate">{{ formatRate(file.receiveRate || 0) }}</div>
+                </div>
               </div>
             </div>
             <div class="transfer-status" :class="`status-${file.status}`">
               {{ getStatusText(file.status) }}
             </div>
+          </div>
+          
+          <!-- 添加进度条 -->
+          <div class="progress-section" v-if="file.status === 'in-progress' || file.status === 'complete'">
+            <div class="progress-bar">
+              <div class="progress-fill" :style="{ width: file.progress + '%' }"></div>
+            </div>
+            <div class="progress-info">
+              <span>{{ Math.round(file.progress) }}%</span>
+            </div>
+          </div>
+          
+          <!-- 添加控制按钮 -->
+          <div class="transfer-controls" v-if="file.status === 'in-progress'">
+            <button class="btn secondary" @click="pauseResumeFile(file)" :disabled="file.isPaused === undefined ? false : file.isPaused">
+              <i class="fas fa-pause" v-if="!file.isPaused"></i>
+              <i class="fas fa-play" v-if="file.isPaused"></i>
+              {{ file.isPaused ? '恢复' : '暂停' }}
+            </button>
+            <button class="btn secondary" @click="cancelFile(file)">
+              <i class="fas fa-times"></i>
+              取消
+            </button>
           </div>
         </div>
       </div>
@@ -45,7 +70,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { formatFileSize } from '../../common/tools'
+import { formatFileSize ,formatRate } from '../../common/tools'
 import {type ServerTransferStatus } from '../../common/types'
 
 
@@ -58,6 +83,8 @@ const receivedFiles = ref<Array<{
   clientId: string
   size:number
   status: 'complete' | 'in-progress' | 'error'
+  receiveRate: number // 添加接收速率
+  isPaused?: boolean // 添加暂停状态
 }>>([])
 
 // 计算属性
@@ -152,6 +179,71 @@ const toggleReceiveService = async () => {
   }
 }
 
+// 暂停/恢复文件传输
+const pauseResumeFile = async (file: { name: string; clientId: string; isPaused?: boolean }) => {
+  try {
+    if (file.isPaused) {
+      // 恢复传输
+      const result = await window.electronAPI.resumeFileTransferFromServer(file.name);
+      if (result.success) {
+        // 更新 UI 状态
+        const fileIndex = receivedFiles.value.findIndex(f => f.name === file.name && f.clientId === file.clientId);
+        if (fileIndex >= 0) {
+          const fileToUpdate = receivedFiles.value[fileIndex];
+          if (fileToUpdate) {
+            fileToUpdate.isPaused = false;
+          }
+        }
+        console.log('Resume request sent successfully');
+      } else {
+        console.error('Failed to send resume request:', result.message);
+      }
+    } else {
+      // 暂停传输
+      const result = await window.electronAPI.pauseFileTransferFromServer(file.name);
+      if (result.success) {
+        // 更新 UI 状态
+        const fileIndex = receivedFiles.value.findIndex(f => f.name === file.name && f.clientId === file.clientId);
+        if (fileIndex >= 0) {
+          const fileToUpdate = receivedFiles.value[fileIndex];
+          if (fileToUpdate) {
+            fileToUpdate.isPaused = true;
+          }
+        }
+        console.log('Pause request sent successfully');
+      } else {
+        console.error('Failed to send pause request:', result.message);
+      }
+    }
+  } catch (error: any) {
+    console.error('Error sending pause/resume request:', error.message || 'Unknown error');
+  }
+}
+
+// 取消文件传输
+const cancelFile = async (file: { name: string; clientId: string }) => {
+  try {
+    const result = await window.electronAPI.cancelFileTransferFromServer(file.name);
+    if (result.success) {
+      // 更新 UI 状态
+      const fileIndex = receivedFiles.value.findIndex(f => f.name === file.name && f.clientId === file.clientId);
+      if (fileIndex >= 0) {
+        const fileToUpdate = receivedFiles.value[fileIndex];
+        if (fileToUpdate) {
+          fileToUpdate.status = 'error';
+          fileToUpdate.progress = 0;
+          fileToUpdate.isPaused = undefined;
+        }
+      }
+      console.log('Cancel request sent successfully');
+    } else {
+      console.error('Failed to send cancel request:', result.message);
+    }
+  } catch (error: any) {
+    console.error('Error sending cancel request:', error.message || 'Unknown error');
+  }
+}
+
 // 处理文件传输状态更新
 const handleFileTransferStatus = (data: ServerTransferStatus) => {
   // 添加新的文件传输记录
@@ -183,6 +275,7 @@ const handleFileTransferStatus = (data: ServerTransferStatus) => {
       progress: 0,
       size: data.filesize,
       clientId: data.clientId,
+      receiveRate: 0,
       status: 'in-progress'
     })
   }
@@ -192,7 +285,11 @@ const handleFileTransferStatus = (data: ServerTransferStatus) => {
       const fileToUpdate = receivedFiles.value[existingFileIndex]
       if (fileToUpdate) {
         fileToUpdate.progress = data.progress || 0;
-        fileToUpdate.status = 'in-progress'
+        fileToUpdate.status = 'in-progress';
+        // 更新接收速率
+        fileToUpdate.receiveRate = data.receiveRate;
+        // 确保暂停状态被清除
+        fileToUpdate.isPaused = false;
       }
     }
   }else if(data.type === 'transfer-complete'){
@@ -201,7 +298,38 @@ const handleFileTransferStatus = (data: ServerTransferStatus) => {
       const fileToUpdate = receivedFiles.value[existingFileIndex]
       if (fileToUpdate) {
         fileToUpdate.progress = 100;
+        fileToUpdate.receiveRate = 0;
         fileToUpdate.status = 'complete'
+        // 清除暂停状态
+        fileToUpdate.isPaused = undefined;
+      }
+    }
+  } else if(data.type === 'transfer-pause'){
+    const existingFileIndex = receivedFiles.value.findIndex((file: { name: string; clientId: string }) => file.name === data.filename && file.clientId === data.clientId)
+    if (existingFileIndex >= 0) {
+      const fileToUpdate = receivedFiles.value[existingFileIndex]
+      if (fileToUpdate) {
+        fileToUpdate.isPaused = true;
+        fileToUpdate.status = 'in-progress'; // 保持进行中状态，但标记为暂停
+      }
+    }
+  } else if(data.type === 'transfer-resume'){
+    const existingFileIndex = receivedFiles.value.findIndex((file: { name: string; clientId: string }) => file.name === data.filename && file.clientId === data.clientId)
+    if (existingFileIndex >= 0) {
+      const fileToUpdate = receivedFiles.value[existingFileIndex]
+      if (fileToUpdate) {
+        fileToUpdate.isPaused = false;
+        fileToUpdate.status = 'in-progress';
+      }
+    }
+  } else if(data.type === 'transfer-cancel'){
+    const existingFileIndex = receivedFiles.value.findIndex((file: { name: string; clientId: string }) => file.name === data.filename && file.clientId === data.clientId)
+    if (existingFileIndex >= 0) {
+      const fileToUpdate = receivedFiles.value[existingFileIndex]
+      if (fileToUpdate) {
+        fileToUpdate.status = 'error';
+        fileToUpdate.progress = 0;
+        fileToUpdate.isPaused = undefined;
       }
     }
   }
@@ -220,13 +348,13 @@ const handleFileTransferError = (error: { message: string }) => {
 
 // 组件挂载时设置事件监听器
 onMounted(() => {
-  window.electronAPI.onFileTransferStatus(handleFileTransferStatus)
-  window.electronAPI.onFileTransferError(handleFileTransferError)
+  window.electronAPI.onServerFileTransferStatus(handleFileTransferStatus)
+  window.electronAPI.onServerFileTransferError(handleFileTransferError)
 })
 
 // 组件卸载时移除事件监听器
 onUnmounted(() => {
-  window.electronAPI.removeAllFileTransferListeners()
+  window.electronAPI.removeAllServerFileTransferListeners()
 })
 </script>
 
@@ -343,6 +471,22 @@ onUnmounted(() => {
   background: var(--bg-button-hover);
 }
 
+.btn.secondary {
+  background: var(--text-muted);
+  color: var(--text-light);
+  margin-left: 10px;
+}
+
+.btn.secondary:hover {
+  background: var(--text-secondary);
+}
+
+.btn:disabled {
+  background: var(--border-color);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
 .transfer-list {
   flex: 1;
   overflow-y: auto;
@@ -384,6 +528,18 @@ onUnmounted(() => {
   color: var(--text-secondary);
   font-size: 14px;
 }
+.transfer-size-rate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+
+.transfer-size,.transfer-rate {
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-style: italic;
+}
 
 .transfer-status {
   font-size: 14px;
@@ -400,5 +556,39 @@ onUnmounted(() => {
 
 .status-error {
   color: #dc3545;
+}
+
+/* 进度条样式 */
+.progress-section {
+  margin-top: 15px;
+}
+
+.progress-bar {
+  height: 10px;
+  background: var(--border-color);
+  border-radius: 5px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--bg-button);
+  border-radius: 5px;
+  width: 0%;
+  transition: width 0.3s ease;
+}
+
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.transfer-controls {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
 }
 </style>

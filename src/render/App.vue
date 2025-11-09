@@ -1,12 +1,16 @@
 <template>
   <div class="app-container" >
     <Navigation />
-    <RouterView />
+    <RouterView v-slot="{ Component }">
+      <KeepAlive>
+          <component :is="Component"/>
+      </KeepAlive>
+    </RouterView>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { onMounted,KeepAlive } from 'vue';
 import Navigation from './components/Navigation.vue'
 import { RouterView } from 'vue-router'
 
