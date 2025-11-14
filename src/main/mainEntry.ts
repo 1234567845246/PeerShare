@@ -1,6 +1,7 @@
 // src\main\mainEntry.ts
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme } from 'electron'
 import { join } from 'path'
+import {Settings} from './settings'
 import { FileTransferServer, FileTransferClient } from './fileTransferServer'
 import { type ServerTransferStatus } from '../common/types'
 import { formatRate } from '../common/tools';
@@ -9,6 +10,7 @@ class Application {
     private mainWindow: BrowserWindow | null = null;
     private fileServer: FileTransferServer | null = null;
     private fileClient: FileTransferClient | null = null;
+    private settings: Settings | null = null;
 
     constructor() {
         this.createmainWindow();
@@ -208,6 +210,8 @@ class Application {
                     message: 'File transfer resumed'
                 });
                 
+     
+                
                 return { success: true, message: 'File transfer resumed' };
             } catch (error: any) {
                 return { success: false, message: error.message || 'Error resuming file transfer' };
@@ -236,6 +240,8 @@ class Application {
                     message: 'File transfer cancelled'
                 });
                 
+                
+                
                 return { success: true, message: 'File transfer cancelled' };
             } catch (error: any) {
                 return { success: false, message: error.message || 'Error cancelling file transfer' };
@@ -243,14 +249,15 @@ class Application {
         });
 
         // 暂停文件传输（从接收端发起）
-        ipcMain.handle('pause-file-transfer-from-server', async (_, filename: string) => {
+        ipcMain.handle('pause-file-transfer-from-server', async (_, clientId: string, filename: string) => {
             try {
                 if (!this.fileServer) {
                     return { success: false, message: 'File server is not running' };
                 }
                 
                 // 让服务器向客户端发送暂停消息
-                this.fileServer.sendPauseToClient(filename);
+                this.fileServer.sendPauseToClient(clientId, filename);
+                
                 
                 return { success: true, message: 'Pause request sent to client' };
             } catch (error: any) {
@@ -259,14 +266,16 @@ class Application {
         });
 
         // 恢复文件传输（从接收端发起）
-        ipcMain.handle('resume-file-transfer-from-server', async (_, filename: string) => {
+        ipcMain.handle('resume-file-transfer-from-server', async (_, clientId: string, filename: string) => {
             try {
                 if (!this.fileServer) {
                     return { success: false, message: 'File server is not running' };
                 }
                 
                 // 让服务器向客户端发送恢复消息
-                this.fileServer.sendResumeToClient(filename);
+                this.fileServer.sendResumeToClient(clientId, filename);
+                
+            
                 
                 return { success: true, message: 'Resume request sent to client' };
             } catch (error: any) {
@@ -275,28 +284,57 @@ class Application {
         });
 
         // 取消文件传输（从接收端发起）
-        ipcMain.handle('cancel-file-transfer-from-server', async (_, filename: string) => {
+        ipcMain.handle('cancel-file-transfer-from-server', async (_, clientId: string, filename: string) => {
             try {
                 if (!this.fileServer) {
                     return { success: false, message: 'File server is not running' };
                 }
                 
                 // 让服务器向客户端发送取消消息
-                this.fileServer.sendCancelToClient(filename);
+                this.fileServer.sendCancelToClient(clientId, filename);
+                
+             
                 
                 return { success: true, message: 'Cancel request sent to client' };
             } catch (error: any) {
                 return { success: false, message: error.message || 'Error sending cancel request to client' };
             }
         });
+        
 
         ipcMain.on('set-theme', (_, theme: 'dark' | 'light') => {
             nativeTheme.themeSource = theme;
         })
 
+        ipcMain.handle('get-settings', async () => {
+            try {
+                if (!this.settings) {
+                    this.settings = new Settings();
+                }
+                const settings = this.settings.getSettingsSync();
+                return settings;
+            } catch (error: any) {
+                return null;
+            }
+        });
+
+        ipcMain.handle('save-settings', async (_, newSettings) => {
+            try {
+                if (!this.settings) {
+                    this.settings = new Settings();
+                }
+                this.settings.setSettingsSync(newSettings);
+                return { success: true, message: 'Settings saved successfully' };
+            } catch (error: any) {
+                return { success: false, message: error.message || 'Error saving settings' };
+            }
+        });
+
         ipcMain.on('open-dev-tools', () => {
             this.mainWindow?.webContents.openDevTools({ mode: 'undocked' });
         })
+
+
     }
 
     private createmainWindow() {
@@ -326,7 +364,6 @@ class Application {
         Menu.setApplicationMenu(null);
         
         if (process.argv[2]) {
-            // this.mainWindow.webContents.openDevTools({ mode: 'undocked' });
             this.mainWindow.loadURL(process.argv[2]);
         } else {
             this.mainWindow.loadFile(join(__dirname, 'index.html'));

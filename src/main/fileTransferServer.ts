@@ -1,7 +1,8 @@
 import WebSocket, { WebSocketServer } from 'ws';
-import { createReadStream, statSync, createWriteStream, WriteStream } from 'fs';
+import { createReadStream, statSync, createWriteStream, WriteStream, ReadStream } from 'fs';
 import { join, basename } from 'path';
 import { type ServerTransferStatus } from '../common/types';
+import EventEmitter from 'events';
 
 // 消息类型定义
 const MessageType = {
@@ -15,7 +16,8 @@ const MessageType = {
     FILE_RESUME: 8,  //恢复传输
     FILE_RESUME_ACK: 9,
     FILE_CANCEL: 11,  //取消传输
-    FILE_CANCEL_ACK: 12
+    FILE_CANCEL_ACK: 12,
+    FILE_CONTROL: 13, //服务端控制请求
 } as const;
 
 type MessageType = typeof MessageType[keyof typeof MessageType];
@@ -83,6 +85,14 @@ interface FileCancelAckMessage {
     success: boolean;
 }
 
+
+
+interface FileControlMessage {
+    type: MessageType;
+    controlType: number; // 服务端控制类型
+    filename: string;
+}
+
 interface FileInfos {
     filename: string;
     fileSize: number;
@@ -106,11 +116,12 @@ FileResume: 字段1=文件名长度，字段2=保留，消息体=文件名
 FileResumeAck: 字段1=文件名长度，字段2=保留，消息体=文件名
 FileCancel: 字段1=文件名长度，字段2=保留，消息体=文件名
 FileCancelAck: 字段1=文件名长度，字段2=保留，消息体=文件名
+FileControl: 字段1=文件名长度，字段2=服务端控制类型，消息体=文件名
 FileStartAck/FileEnd：字段1和字段2均为保留字段*/
 const MAGIC_NUMBER = 0x46544D53; // "FTMS"
 const HEADER_SIZE = 16;
 
-export class FileTransferServer {
+export class FileTransferServer extends EventEmitter{
     private wss: WebSocketServer;
     private port: number;
     private clients: Set<WebSocket>;
@@ -120,6 +131,7 @@ export class FileTransferServer {
     private onServerProgress: ((status: ServerTransferStatus) => void) | null = null; // 服务端进度回调
 
     constructor(port: number = 8080) {
+        super();
         this.port = port;
         this.clients = new Set();
         this.fileStreams = new Map();
@@ -257,7 +269,7 @@ export class FileTransferServer {
 
             case MessageType.FILE_END:
                 return { type: MessageType.FILE_END };
-                
+
             case MessageType.FILE_PAUSE:
                 const pauseFilenameLength = field1;
                 if (buffer.length < HEADER_SIZE + pauseFilenameLength) {
@@ -265,7 +277,7 @@ export class FileTransferServer {
                 }
                 const pauseFilename = buffer.subarray(HEADER_SIZE, HEADER_SIZE + pauseFilenameLength).toString('utf8');
                 return { type: MessageType.FILE_PAUSE, filename: pauseFilename };
-                
+
             case MessageType.FILE_RESUME:
                 const resumeFilenameLength = field1;
                 if (buffer.length < HEADER_SIZE + resumeFilenameLength) {
@@ -273,7 +285,7 @@ export class FileTransferServer {
                 }
                 const resumeFilename = buffer.subarray(HEADER_SIZE, HEADER_SIZE + resumeFilenameLength).toString('utf8');
                 return { type: MessageType.FILE_RESUME, filename: resumeFilename };
-                
+
             case MessageType.FILE_CANCEL:
                 const cancelFilenameLength = field1;
                 if (buffer.length < HEADER_SIZE + cancelFilenameLength) {
@@ -281,6 +293,15 @@ export class FileTransferServer {
                 }
                 const cancelFilename = buffer.subarray(HEADER_SIZE, HEADER_SIZE + cancelFilenameLength).toString('utf8');
                 return { type: MessageType.FILE_CANCEL, filename: cancelFilename };
+                
+            case MessageType.FILE_CONTROL:
+                const controlFilenameLength = field1;
+                const controlType = field2; // 控制类型
+                if (buffer.length < HEADER_SIZE + controlFilenameLength) {
+                    throw new Error('Incomplete FILE_CONTROL message');
+                }
+                const controlFilename = buffer.subarray(HEADER_SIZE, HEADER_SIZE + controlFilenameLength).toString('utf8');
+                return { type: MessageType.FILE_CONTROL, controlType, filename: controlFilename };
 
             default:
                 throw new Error(`Unknown message type: ${messageType}`);
@@ -289,7 +310,7 @@ export class FileTransferServer {
 
     private encodeMessage(message: any): Buffer {
         switch (message.type) {
-            case MessageType.FILE_START:
+            case MessageType.FILE_START: {
                 const filenameBuffer = Buffer.from(message.filename, 'utf8');
                 const filenameLength = filenameBuffer.length;
 
@@ -301,15 +322,16 @@ export class FileTransferServer {
                 filenameBuffer.copy(fileStartBuffer, HEADER_SIZE);
                 return fileStartBuffer;
 
-            case MessageType.FILE_START_ACK:
+            }
+            case MessageType.FILE_START_ACK: {
                 const fileStartAckBuffer = Buffer.alloc(HEADER_SIZE);
                 fileStartAckBuffer.writeUInt32BE(MAGIC_NUMBER, 0);
                 fileStartAckBuffer.writeUInt32BE(MessageType.FILE_START_ACK, 4);
                 fileStartAckBuffer.writeUInt32BE(0, 8);
                 fileStartAckBuffer.writeUInt32BE(0, 12);
                 return fileStartAckBuffer;
-
-            case MessageType.FILE_CHUNK:
+            }
+            case MessageType.FILE_CHUNK: {
                 const chunkLength = message.chunkData.length;
 
                 const fileChunkBuffer = Buffer.alloc(HEADER_SIZE + chunkLength);
@@ -319,27 +341,27 @@ export class FileTransferServer {
                 fileChunkBuffer.writeUInt32BE(chunkLength, 12);
                 message.chunkData.copy(fileChunkBuffer, HEADER_SIZE);
                 return fileChunkBuffer;
-
-            case MessageType.FILE_CHUNK_ACK:
+            }
+            case MessageType.FILE_CHUNK_ACK: {
                 const fileAckBuffer = Buffer.alloc(HEADER_SIZE);
                 fileAckBuffer.writeUInt32BE(MAGIC_NUMBER, 0);
                 fileAckBuffer.writeUInt32BE(MessageType.FILE_CHUNK_ACK, 4);
                 fileAckBuffer.writeUInt32BE(message.ackIndex, 8);
                 fileAckBuffer.writeUInt32BE(0, 12);
                 return fileAckBuffer;
-
-            case MessageType.FILE_END:
+            }
+            case MessageType.FILE_END: {
                 const fileEndBuffer = Buffer.alloc(HEADER_SIZE);
                 fileEndBuffer.writeUInt32BE(MAGIC_NUMBER, 0);
                 fileEndBuffer.writeUInt32BE(MessageType.FILE_END, 4);
                 fileEndBuffer.writeUInt32BE(0, 8);
                 fileEndBuffer.writeUInt32BE(0, 12);
                 return fileEndBuffer;
-                
-            case MessageType.FILE_PAUSE_ACK:
+            }
+            case MessageType.FILE_PAUSE_ACK: {
                 const pauseAckFilenameBuffer = Buffer.from(message.filename, 'utf8');
                 const pauseAckFilenameLength = pauseAckFilenameBuffer.length;
-                
+
                 const filePauseAckBuffer = Buffer.alloc(HEADER_SIZE + pauseAckFilenameLength);
                 filePauseAckBuffer.writeUInt32BE(MAGIC_NUMBER, 0);
                 filePauseAckBuffer.writeUInt32BE(MessageType.FILE_PAUSE_ACK, 4);
@@ -347,11 +369,11 @@ export class FileTransferServer {
                 filePauseAckBuffer.writeUInt32BE(0, 12); // 保留字段
                 pauseAckFilenameBuffer.copy(filePauseAckBuffer, HEADER_SIZE);
                 return filePauseAckBuffer;
-                
-            case MessageType.FILE_RESUME_ACK:
+            }
+            case MessageType.FILE_RESUME_ACK: {
                 const resumeAckFilenameBuffer = Buffer.from(message.filename, 'utf8');
                 const resumeAckFilenameLength = resumeAckFilenameBuffer.length;
-                
+                            
                 const fileResumeAckBuffer = Buffer.alloc(HEADER_SIZE + resumeAckFilenameLength);
                 fileResumeAckBuffer.writeUInt32BE(MAGIC_NUMBER, 0);
                 fileResumeAckBuffer.writeUInt32BE(MessageType.FILE_RESUME_ACK, 4);
@@ -359,11 +381,11 @@ export class FileTransferServer {
                 fileResumeAckBuffer.writeUInt32BE(message.lastChunkIndex, 12);
                 resumeAckFilenameBuffer.copy(fileResumeAckBuffer, HEADER_SIZE);
                 return fileResumeAckBuffer;
-                
-            case MessageType.FILE_CANCEL_ACK:
+            }
+            case MessageType.FILE_CANCEL_ACK: {
                 const cancelAckFilenameBuffer = Buffer.from(message.filename, 'utf8');
                 const cancelAckFilenameLength = cancelAckFilenameBuffer.length;
-                
+
                 const fileCancelAckBuffer = Buffer.alloc(HEADER_SIZE + cancelAckFilenameLength);
                 fileCancelAckBuffer.writeUInt32BE(MAGIC_NUMBER, 0);
                 fileCancelAckBuffer.writeUInt32BE(MessageType.FILE_CANCEL_ACK, 4);
@@ -371,7 +393,19 @@ export class FileTransferServer {
                 fileCancelAckBuffer.writeUInt32BE(message.success ? 1 : 0, 12);
                 cancelAckFilenameBuffer.copy(fileCancelAckBuffer, HEADER_SIZE);
                 return fileCancelAckBuffer;
-
+            }
+            case MessageType.FILE_CONTROL: {
+                const controlFilenameBuffer = Buffer.from(message.filename, 'utf8');
+                const controlFilenameLength = controlFilenameBuffer.length;
+                
+                const fileControlBuffer = Buffer.alloc(HEADER_SIZE + controlFilenameLength);
+                fileControlBuffer.writeUInt32BE(MAGIC_NUMBER, 0);
+                fileControlBuffer.writeUInt32BE(MessageType.FILE_CONTROL, 4);
+                fileControlBuffer.writeUInt32BE(controlFilenameLength, 8);
+                fileControlBuffer.writeUInt32BE(message.controlType, 12); // 控制类型
+                controlFilenameBuffer.copy(fileControlBuffer, HEADER_SIZE);
+                return fileControlBuffer;
+            }
             default:
                 throw new Error(`Unknown message type: ${message.type}`);
         }
@@ -404,6 +438,10 @@ export class FileTransferServer {
             case MessageType.FILE_START_ACK:
                 // 客户端确认收到文件开始（服务端不需要处理）
                 console.log('Received FILE_START_ACK');
+                break;
+            case MessageType.FILE_CONTROL:
+                // 处理服务端控制消息
+                this.handleFileControl(ws, message);
                 break;
             default:
                 console.log('Unknown message type:', message.type);
@@ -455,10 +493,9 @@ export class FileTransferServer {
             return;
         }
 
-        // 检查是否暂停
+        // 检查是否暂停：即使处于 paused 状态，也处理当前到达的分片并发送 ACK（不要直接丢弃）
         if (fileInfo.isPaused) {
-            console.log(`File transfer is paused for ${fileInfo.filename}`);
-            return;
+            console.log(`File transfer is paused for ${fileInfo.filename}, writing arrived chunk ${message.chunkIndex} and will ACK`);
         }
 
         // 写入文件块数据
@@ -497,14 +534,14 @@ export class FileTransferServer {
 
                 // 调用服务端进度回调函数
                 if (this.onServerProgress) {
-                    this.onServerProgress({ 
-                        type: 'transfer-progress', 
-                        clientId: ws.url || 'unknown', 
-                        filename: fileInfo.filename, 
-                        progress, 
+                    this.onServerProgress({
+                        type: 'transfer-progress',
+                        clientId: ws.url || 'unknown',
+                        filename: fileInfo.filename,
+                        progress,
                         message: '',
                         receiveRate: fileInfo.receiveRate // 添加接收速率
-                    } ); 
+                    });
                 }
             }
         });
@@ -541,7 +578,7 @@ export class FileTransferServer {
     // 处理文件暂停消息
     private handleFilePause(ws: WebSocket, message: FilePauseMessage) {
         console.log(`Received pause request for file: ${message.filename}`);
-        
+
         // 获取文件信息
         const fileInfo = this.fileInfos.get(ws);
         if (!fileInfo) {
@@ -555,7 +592,7 @@ export class FileTransferServer {
             ws.send(this.encodeMessage(ackMessage));
             return;
         }
-        
+
         // 检查文件名是否匹配
         if (fileInfo.filename !== message.filename) {
             console.error('Filename mismatch for pause request');
@@ -568,11 +605,11 @@ export class FileTransferServer {
             ws.send(this.encodeMessage(ackMessage));
             return;
         }
-        
+
         // 设置暂停状态
         fileInfo.isPaused = true;
         this.fileInfos.set(ws, fileInfo);
-        
+
         // 发送暂停确认消息
         const ackMessage: FilePauseAckMessage = {
             type: MessageType.FILE_PAUSE_ACK,
@@ -580,22 +617,22 @@ export class FileTransferServer {
             success: true
         };
         ws.send(this.encodeMessage(ackMessage));
-        
+
         // 调用服务端进度回调函数
         if (this.onServerProgress) {
-            this.onServerProgress({ 
-                type: 'transfer-pause', 
-                clientId: ws.url || 'unknown', 
-                filename: fileInfo.filename, 
+            this.onServerProgress({
+                type: 'transfer-pause',
+                clientId: ws.url || 'unknown',
+                filename: fileInfo.filename,
                 message: '传输已暂停'
-            }); 
+            });
         }
     }
 
     // 处理文件恢复消息
     private handleFileResume(ws: WebSocket, message: FileResumeMessage) {
         console.log(`Received resume request for file: ${message.filename}`);
-        
+
         // 获取文件信息
         const fileInfo = this.fileInfos.get(ws);
         if (!fileInfo) {
@@ -610,7 +647,7 @@ export class FileTransferServer {
             ws.send(this.encodeMessage(ackMessage));
             return;
         }
-        
+
         // 检查文件名是否匹配
         if (fileInfo.filename !== message.filename) {
             console.error('Filename mismatch for resume request');
@@ -624,11 +661,11 @@ export class FileTransferServer {
             ws.send(this.encodeMessage(ackMessage));
             return;
         }
-        
+
         // 取消暂停状态
         fileInfo.isPaused = false;
         this.fileInfos.set(ws, fileInfo);
-        
+
         // 发送恢复确认消息，包含最后一个块索引
         const ackMessage: FileResumeAckMessage = {
             type: MessageType.FILE_RESUME_ACK,
@@ -637,22 +674,22 @@ export class FileTransferServer {
             lastChunkIndex: fileInfo.lastChunkIndex
         };
         ws.send(this.encodeMessage(ackMessage));
-        
+
         // 调用服务端进度回调函数
         if (this.onServerProgress) {
-            this.onServerProgress({ 
-                type: 'transfer-resume', 
-                clientId: ws.url || 'unknown', 
-                filename: fileInfo.filename, 
+            this.onServerProgress({
+                type: 'transfer-resume',
+                clientId: ws.url || 'unknown',
+                filename: fileInfo.filename,
                 message: '传输已恢复'
-            }); 
+            });
         }
     }
 
     // 处理文件取消消息
     private handleFileCancel(ws: WebSocket, message: FileCancelMessage) {
         console.log(`Received cancel request for file: ${message.filename}`);
-        
+
         // 获取文件信息
         const fileInfo = this.fileInfos.get(ws);
         if (!fileInfo) {
@@ -666,7 +703,7 @@ export class FileTransferServer {
             ws.send(this.encodeMessage(ackMessage));
             return;
         }
-        
+
         // 检查文件名是否匹配
         if (fileInfo.filename !== message.filename) {
             console.error('Filename mismatch for cancel request');
@@ -679,17 +716,17 @@ export class FileTransferServer {
             ws.send(this.encodeMessage(ackMessage));
             return;
         }
-        
+
         // 关闭并清理该客户端的文件流
         const writeStream = this.fileStreams.get(ws);
         if (writeStream) {
             writeStream.end();
             this.fileStreams.delete(ws);
         }
-        
+
         // 删除该客户端的文件信息
         this.fileInfos.delete(ws);
-        
+
         // 发送取消确认消息（成功）
         const ackMessage: FileCancelAckMessage = {
             type: MessageType.FILE_CANCEL_ACK,
@@ -697,58 +734,74 @@ export class FileTransferServer {
             success: true
         };
         ws.send(this.encodeMessage(ackMessage));
-        
+
         // 调用服务端进度回调函数
         if (this.onServerProgress) {
-            this.onServerProgress({ 
-                type: 'transfer-cancel', 
-                clientId: ws.url || 'unknown', 
-                filename: fileInfo.filename, 
+            this.onServerProgress({
+                type: 'transfer-cancel',
+                clientId: ws.url || 'unknown',
+                filename: fileInfo.filename,
                 message: '传输已取消'
-            }); 
+            });
         }
     }
 
-    // 添加发送暂停消息到客户端的方法
-    public sendPauseToClient(filename: string): void {
-        // 遍历所有客户端连接，找到对应的客户端并发送暂停消息
-        for (const [ws, fileInfo] of this.fileInfos.entries()) {
-            if (fileInfo.filename === filename) {
+    public sendPauseToClient(clientId: string, filename: string): void {
+        this.sendControlToClient(clientId, filename, MessageType.FILE_PAUSE);
+    }
+    public sendResumeToClient(clientId: string, filename: string): void {
+        this.sendControlToClient(clientId, filename, MessageType.FILE_RESUME);
+    }
+    public sendCancelToClient(clientId: string, filename: string): void {
+        this.sendControlToClient(clientId, filename, MessageType.FILE_CANCEL);
+    }
+
+    // 处理文件控制消息
+    private handleFileControl(ws: WebSocket, message: FileControlMessage) {
+        console.log(`Received control request for file: ${message.filename}, control type: ${message.controlType}`);
+        
+        // 根据控制类型发送相应的消息给客户端
+        switch (message.controlType) {
+            case MessageType.FILE_PAUSE:
+                // 发送暂停消息给客户端
                 const pauseMsg: FilePauseMessage = {
                     type: MessageType.FILE_PAUSE,
-                    filename: filename
+                    filename: message.filename
                 };
                 ws.send(this.encodeMessage(pauseMsg));
                 break;
-            }
-        }
-    }
-
-    // 添加发送恢复消息到客户端的方法
-    public sendResumeToClient(filename: string): void {
-        // 遍历所有客户端连接，找到对应的客户端并发送恢复消息
-        for (const [ws, fileInfo] of this.fileInfos.entries()) {
-            if (fileInfo.filename === filename) {
+            case MessageType.FILE_RESUME:
+                // 发送恢复消息给客户端
                 const resumeMsg: FileResumeMessage = {
                     type: MessageType.FILE_RESUME,
-                    filename: filename
+                    filename: message.filename
                 };
                 ws.send(this.encodeMessage(resumeMsg));
                 break;
-            }
-        }
-    }
-
-    // 添加发送取消消息到客户端的方法
-    public sendCancelToClient(filename: string): void {
-        // 遍历所有客户端连接，找到对应的客户端并发送取消消息
-        for (const [ws, fileInfo] of this.fileInfos.entries()) {
-            if (fileInfo.filename === filename) {
+            case MessageType.FILE_CANCEL:
+                // 发送取消消息给客户端
                 const cancelMsg: FileCancelMessage = {
                     type: MessageType.FILE_CANCEL,
-                    filename: filename
+                    filename: message.filename
                 };
                 ws.send(this.encodeMessage(cancelMsg));
+                break;
+        }
+    }
+    
+  
+    
+    // 添加发送控制消息到客户端的方法
+    public sendControlToClient(clientId: string, filename: string, controlType: number): void {
+        // 遍历所有客户端连接，找到对应的客户端并发送控制消息
+        for (const [ws, fileInfo] of this.fileInfos.entries()) {
+            if (clientId === ws.url && fileInfo.filename === filename) {
+                const controlMsg: FileControlMessage = {
+                    type: MessageType.FILE_CONTROL,
+                    controlType: controlType,
+                    filename: filename
+                };
+                ws.send(this.encodeMessage(controlMsg));
                 break;
             }
         }
@@ -788,7 +841,10 @@ export class FileTransferClient {
     private isPaused: boolean = false; // 添加暂停状态
     private isCancelled: boolean = false; // 添加取消状态
     private lastChunkIndex: number = -1; // 添加最后一个块索引
-    private fileStream: ReadableStream | null = null; // 文件流引用
+    private fileStream: ReadStream | null = null; // 文件流引用
+    private activeFilePath: string | null = null; // 正在传输的本地文件路径
+    private sendingInProgress: boolean = false; // 标记是否正在发送中
+    
 
     constructor(url: string) {
         this.url = url;
@@ -880,18 +936,57 @@ export class FileTransferClient {
             case MessageType.FILE_CHUNK_ACK:
                 const ackIndex = field1;
                 return { type: MessageType.FILE_CHUNK_ACK, ackIndex };
-            case MessageType.FILE_PAUSE:
-                return { type: MessageType.FILE_PAUSE };
+            // case MessageType.FILE_PAUSE:
+            //     const pauseFilenameLength = field1;
+            //     if (buffer.length < HEADER_SIZE + pauseFilenameLength) {
+            //         throw new Error('Incomplete FILE_PAUSE message');
+            //     }
+            //     const pauseFilename = buffer.subarray(HEADER_SIZE, HEADER_SIZE + pauseFilenameLength).toString('utf8');
+            //     return { type: MessageType.FILE_PAUSE, filename: pauseFilename };
             case MessageType.FILE_PAUSE_ACK:
-                return { type: MessageType.FILE_PAUSE_ACK };
-            case MessageType.FILE_RESUME:
-                return { type: MessageType.FILE_RESUME };
+                const pauseAckFilenameLength = field1;
+                if (buffer.length < HEADER_SIZE + pauseAckFilenameLength) {
+                    throw new Error('Incomplete FILE_PAUSE_ACK message');
+                }
+                const pauseAckFilename = buffer.subarray(HEADER_SIZE, HEADER_SIZE + pauseAckFilenameLength).toString('utf8');
+                return { type: MessageType.FILE_PAUSE_ACK, filename: pauseAckFilename };
+            // case MessageType.FILE_RESUME:
+            //     const resumeFilenameLength = field1;
+            //     if (buffer.length < HEADER_SIZE + resumeFilenameLength) {
+            //         throw new Error('Incomplete FILE_RESUME message');
+            //     }
+            //     const resumeFilename = buffer.subarray(HEADER_SIZE, HEADER_SIZE + resumeFilenameLength).toString('utf8');
+            //     return { type: MessageType.FILE_RESUME, filename: resumeFilename };
             case MessageType.FILE_RESUME_ACK:
-                return { type: MessageType.FILE_RESUME_ACK, lastChunkIndex: field2 };
-            case MessageType.FILE_CANCEL:
-                return { type: MessageType.FILE_CANCEL };
+                const resumeAckFilenameLength = field1;
+                if (buffer.length < HEADER_SIZE + resumeAckFilenameLength) {
+                    throw new Error('Incomplete FILE_RESUME_ACK message');
+                }
+                const resumeAckFilename = buffer.subarray(HEADER_SIZE, HEADER_SIZE + resumeAckFilenameLength).toString('utf8');
+                return { type: MessageType.FILE_RESUME_ACK, filename: resumeAckFilename, lastChunkIndex: field2 };
+            // case MessageType.FILE_CANCEL:
+            //     const cancelFilenameLength = field1;
+            //     if (buffer.length < HEADER_SIZE + cancelFilenameLength) {
+            //         throw new Error('Incomplete FILE_CANCEL message');
+            //     }
+            //     const cancelFilename = buffer.subarray(HEADER_SIZE, HEADER_SIZE + cancelFilenameLength).toString('utf8');
+            //     return { type: MessageType.FILE_CANCEL, filename: cancelFilename };
             case MessageType.FILE_CANCEL_ACK:
-                return { type: MessageType.FILE_CANCEL_ACK, success: field2 === 1 };
+                const cancelAckFilenameLength = field1;
+                if (buffer.length < HEADER_SIZE + cancelAckFilenameLength) {
+                    throw new Error('Incomplete FILE_CANCEL_ACK message');
+                }
+                const cancelAckFilename = buffer.subarray(HEADER_SIZE, HEADER_SIZE + cancelAckFilenameLength).toString('utf8');
+                const success = field2 === 1;
+                return { type: MessageType.FILE_CANCEL_ACK, filename: cancelAckFilename, success };
+            case MessageType.FILE_CONTROL:
+                const controlFilenameLength = field1;
+                const controlType = field2; // 控制类型
+                if (buffer.length < HEADER_SIZE + controlFilenameLength) {
+                    throw new Error('Incomplete FILE_CONTROL message');
+                }
+                const controlFilename = buffer.subarray(HEADER_SIZE, HEADER_SIZE + controlFilenameLength).toString('utf8');
+                return { type: MessageType.FILE_CONTROL, controlType, filename: controlFilename };
             case MessageType.FILE_END:
                 return { type: MessageType.FILE_END };
 
@@ -949,6 +1044,54 @@ export class FileTransferClient {
                 fileEndBuffer.writeUInt32BE(0, 12);
                 return fileEndBuffer;
 
+            case MessageType.FILE_PAUSE:
+                const pauseFilenameBuffer = Buffer.from(message.filename, 'utf8');
+                const pauseFilenameLength = pauseFilenameBuffer.length;
+
+                const filePauseBuffer = Buffer.alloc(HEADER_SIZE + pauseFilenameLength);
+                filePauseBuffer.writeUInt32BE(MAGIC_NUMBER, 0);
+                filePauseBuffer.writeUInt32BE(MessageType.FILE_PAUSE, 4);
+                filePauseBuffer.writeUInt32BE(pauseFilenameLength, 8);
+                filePauseBuffer.writeUInt32BE(0, 12); // 保留字段
+                pauseFilenameBuffer.copy(filePauseBuffer, HEADER_SIZE);
+                return filePauseBuffer;
+
+            case MessageType.FILE_RESUME:
+                const resumeFilenameBuffer = Buffer.from(message.filename, 'utf8');
+                const resumeFilenameLength = resumeFilenameBuffer.length;
+
+                const fileResumeBuffer = Buffer.alloc(HEADER_SIZE + resumeFilenameLength);
+                fileResumeBuffer.writeUInt32BE(MAGIC_NUMBER, 0);
+                fileResumeBuffer.writeUInt32BE(MessageType.FILE_RESUME, 4);
+                fileResumeBuffer.writeUInt32BE(resumeFilenameLength, 8);
+                fileResumeBuffer.writeUInt32BE(0, 12); // 保留字段
+                resumeFilenameBuffer.copy(fileResumeBuffer, HEADER_SIZE);
+                return fileResumeBuffer;
+
+            case MessageType.FILE_CANCEL:
+                const cancelFilenameBuffer = Buffer.from(message.filename, 'utf8');
+                const cancelFilenameLength = cancelFilenameBuffer.length;
+
+                const fileCancelBuffer = Buffer.alloc(HEADER_SIZE + cancelFilenameLength);
+                fileCancelBuffer.writeUInt32BE(MAGIC_NUMBER, 0);
+                fileCancelBuffer.writeUInt32BE(MessageType.FILE_CANCEL, 4);
+                fileCancelBuffer.writeUInt32BE(cancelFilenameLength, 8);
+                fileCancelBuffer.writeUInt32BE(0, 12); // 保留字段
+                cancelFilenameBuffer.copy(fileCancelBuffer, HEADER_SIZE);
+                return fileCancelBuffer;
+                
+            // case MessageType.FILE_CONTROL:
+            //     const controlFilenameBuffer = Buffer.from(message.filename, 'utf8');
+            //     const controlFilenameLength = controlFilenameBuffer.length;
+                
+            //     const fileControlBuffer = Buffer.alloc(HEADER_SIZE + controlFilenameLength);
+            //     fileControlBuffer.writeUInt32BE(MAGIC_NUMBER, 0);
+            //     fileControlBuffer.writeUInt32BE(MessageType.FILE_CONTROL, 4);
+            //     fileControlBuffer.writeUInt32BE(controlFilenameLength, 8);
+            //     fileControlBuffer.writeUInt32BE(message.controlType, 12); // 控制类型
+            //     controlFilenameBuffer.copy(fileControlBuffer, HEADER_SIZE);
+            //     return fileControlBuffer;
+
             default:
                 throw new Error(`Unknown message type: ${message.type}`);
         }
@@ -967,68 +1110,127 @@ export class FileTransferClient {
             case MessageType.FILE_CHUNK_ACK:
                 this.handleAck(message.ackIndex);
                 break;
-            case MessageType.FILE_PAUSE:
-                console.log('Received FILE_PAUSE from server');
-                this.isPaused = true;
-                if (this.onProgress) {
-                    this.onProgress(-1); // -1 表示暂停
-                }
-                // 发送暂停确认消息
-                const pauseAckMsg = {
-                    type: MessageType.FILE_PAUSE_ACK,
-                    filename: message.filename,
-                    success: true
-                };
-                this.ws?.send(this.encodeMessage(pauseAckMsg));
-                break;
-            case MessageType.FILE_RESUME:
-                console.log('Received FILE_RESUME from server');
-                this.isPaused = false;
-                if (this.onProgress) {
-                    this.onProgress(-2); // -2 表示恢复
-                }
-                // 发送恢复确认消息
-                const resumeAckMsg = {
-                    type: MessageType.FILE_RESUME_ACK,
-                    filename: message.filename,
-                    success: true,
-                    lastChunkIndex: this.lastChunkIndex
-                };
-                this.ws?.send(this.encodeMessage(resumeAckMsg));
-                break;
-            case MessageType.FILE_CANCEL:
-                console.log('Received FILE_CANCEL from server');
-                this.isCancelled = true;
-                if (this.onProgress) {
-                    this.onProgress(-3); // -3 表示取消
-                }
-                // 发送取消确认消息
-                const cancelAckMsg = {
-                    type: MessageType.FILE_CANCEL_ACK,
-                    filename: message.filename,
-                    success: true
-                };
-                this.ws?.send(this.encodeMessage(cancelAckMsg));
-                break;
+            // case MessageType.FILE_PAUSE:
+            //     console.log('Received FILE_PAUSE from server');
+            //     this.isPaused = true;
+            //     if (this.onProgress) {
+            //         this.onProgress(-1); // -1 表示暂停
+            //     }
+            //     // 发送暂停确认消息
+            //     const pauseAckMsg = {
+            //         type: MessageType.FILE_PAUSE_ACK,
+            //         filename: message.filename,
+            //         success: true
+            //     };
+            //     this.ws?.send(this.encodeMessage(pauseAckMsg));
+            //     break;
+            // case MessageType.FILE_RESUME:
+            //     console.log('Received FILE_RESUME from server');
+            //     this.isPaused = false;
+            //     if (this.onProgress) {
+            //         this.onProgress(-2); // -2 表示恢复
+            //     }
+            //     // 发送恢复确认消息
+            //     const resumeAckMsg = {
+            //         type: MessageType.FILE_RESUME_ACK,
+            //         filename: message.filename,
+            //         success: true,
+            //         lastChunkIndex: this.lastChunkIndex
+            //     };
+            //     this.ws?.send(this.encodeMessage(resumeAckMsg));
+            //     break;
+            // case MessageType.FILE_CANCEL:
+            //     console.log('Received FILE_CANCEL from server');
+            //     this.isCancelled = true;
+            //     if (this.onProgress) {
+            //         this.onProgress(-3); // -3 表示取消
+            //     }
+            //     // 发送取消确认消息
+            //     const cancelAckMsg = {
+            //         type: MessageType.FILE_CANCEL_ACK,
+            //         filename: message.filename,
+            //         success: true
+            //     };
+            //     this.ws?.send(this.encodeMessage(cancelAckMsg));
+            //     break;
             case MessageType.FILE_PAUSE_ACK:
                 console.log('Received FILE_PAUSE_ACK');
-                if (this.onProgress) {
-                    this.onProgress(-1); // -1 表示暂停
+                // 设置暂停状态，停止发送
+                this.isPaused = true;
+                // 如果存在文件流，销毁它以确保不会再产出已缓冲的 chunk
+                try {
+                    if (this.fileStream) {
+                        this.fileStream.destroy();
+                        this.fileStream = null;
+                    }
+                } catch (e) {
+                    // ignore
                 }
+                // 发送循环将退出；标记发送不在进行
+                this.sendingInProgress = false;
                 break;
             case MessageType.FILE_RESUME_ACK:
                 console.log('Received FILE_RESUME_ACK');
-                this.isPaused = false;
+                // 服务器返回最后一个已写入的块索引，客户端根据此索引重新从后续块开始发送
                 this.lastChunkIndex = message.lastChunkIndex;
-                if (this.onProgress) {
-                    this.onProgress(-2); // -2 表示恢复
+                this.isPaused = false;
+                // 如果存在活动文件路径且当前没有正在发送，则从 lastChunkIndex+1 处继续发送
+                if (this.activeFilePath && !this.sendingInProgress) {
+                    // 异步恢复发送，不阻塞消息处理
+                    this.sendFileFromOffset(this.activeFilePath, this.lastChunkIndex + 1).catch(err => {
+                        console.error('Error while resuming transfer:', err);
+                    });
                 }
                 break;
             case MessageType.FILE_CANCEL_ACK:
                 console.log('Received FILE_CANCEL_ACK');
                 this.isCancelled = true;
-                if (this.onProgress) {
-                    this.onProgress(-3); // -3 表示取消
+                // 停止发送
+                break;
+            case MessageType.FILE_CONTROL:
+                console.log('Received FILE_CONTROL from server');
+                // 根据控制类型执行相应的操作
+                switch (message.controlType) {
+                    case MessageType.FILE_PAUSE:
+                        this.isPaused = true;
+                        if (this.onProgress) {
+                            this.onProgress(-1); // -1 表示暂停
+                        }
+                        // 发送暂停确认消息
+                        const pauseAckMsg = {
+                            type: MessageType.FILE_PAUSE_ACK,
+                            filename: message.filename,
+                            success: true
+                        };
+                        this.ws?.send(this.encodeMessage(pauseAckMsg));
+                        break;
+                    case MessageType.FILE_RESUME:
+                        this.isPaused = false;
+                        if (this.onProgress) {
+                            this.onProgress(-2); // -2 表示恢复
+                        }
+                        // 发送恢复确认消息
+                        const resumeAckMsg = {
+                            type: MessageType.FILE_RESUME_ACK,
+                            filename: message.filename,
+                            success: true,
+                            lastChunkIndex: this.lastChunkIndex
+                        };
+                        this.ws?.send(this.encodeMessage(resumeAckMsg));
+                        break;
+                    case MessageType.FILE_CANCEL:
+                        this.isCancelled = true;
+                        if (this.onProgress) {
+                            this.onProgress(-3); // -3 表示取消
+                        }
+                        // 发送取消确认消息
+                        const cancelAckMsg = {
+                            type: MessageType.FILE_CANCEL_ACK,
+                            filename: message.filename,
+                            success: true
+                        };
+                        this.ws?.send(this.encodeMessage(cancelAckMsg));
+                        break;
                 }
                 break;
             case MessageType.FILE_START:
@@ -1043,6 +1245,13 @@ export class FileTransferClient {
     }
 
     private handleAck(index: number) {
+        // 处理暂停状态下的特殊ACK（index = -1）
+        if (index === -1) {
+            console.log('Received pause ACK, chunk was not processed by server');
+            // 不删除pendingAcks，因为我们没有实际发送这个块
+            return;
+        }
+        
         console.log(`Received ACK for chunk ${index}`);
         this.pendingAcks.delete(index);
 
@@ -1055,6 +1264,11 @@ export class FileTransferClient {
     }
 
     public async sendFile(filePath: string): Promise<void> {
+        // 从头开始发送文件（chunkIndex = 0）
+        return this.sendFileFromOffset(filePath, 0);
+    }
+
+    public async sendFileFromOffset(filePath: string, startChunkIndex: number): Promise<void> {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             throw new Error('WebSocket is not connected');
         }
@@ -1062,41 +1276,54 @@ export class FileTransferClient {
         const filename = basename(filePath);
         const fileSize = statSync(filePath).size;
 
-        console.log(`Sending file: ${filename} (${fileSize} bytes)`);
+        console.log(`Sending file: ${filename} (${fileSize} bytes) from chunk index ${startChunkIndex}`);
+
+        // 记录正在传输的文件路径，供 resume 使用
+        this.activeFilePath = filePath;
+        this.sendingInProgress = true;
 
         // 初始化传输统计信息
-        this.startTime = Date.now();
-        this.lastUpdateTime = Date.now();
-        this.bytesSent = 0;
+        if (startChunkIndex === 0) {
+            this.startTime = Date.now();
+            this.lastUpdateTime = Date.now();
+            this.bytesSent = 0;
+        }
         this.isPaused = false;
         this.isCancelled = false;
-        this.lastChunkIndex = -1;
+        this.lastChunkIndex = startChunkIndex - 1; // 设置为上一个chunk索引
 
-        // 1. 发送文件开始信号
-        const fileStartMsg: FileStartMessage = {
-            type: MessageType.FILE_START,
-            filename: filename,
-            fileSize: fileSize
-        };
-        this.ws.send(this.encodeMessage(fileStartMsg));
+        // 如果是从头开始，发送文件开始信号
+        if (startChunkIndex === 0) {
+            // 1. 发送文件开始信号
+            const fileStartMsg: FileStartMessage = {
+                type: MessageType.FILE_START,
+                filename: filename,
+                fileSize: fileSize
+            };
+            this.ws.send(this.encodeMessage(fileStartMsg));
 
-        // 2. 等待文件开始确认
-        this.receivedFileStartAck = false;
-        await new Promise<void>((resolve, reject) => {
-            this.fileStartAckResolver = resolve;
-            // 设置30秒超时
-            setTimeout(() => {
-                if (!this.receivedFileStartAck) {
-                    reject(new Error('Timeout waiting for FILE_START_ACK'));
-                }
-            }, this.START_ACK_TIMEOUT);
+            // 2. 等待文件开始确认
+            this.receivedFileStartAck = false;
+            await new Promise<void>((resolve, reject) => {
+                this.fileStartAckResolver = resolve;
+                // 设置30秒超时
+                setTimeout(() => {
+                    if (!this.receivedFileStartAck) {
+                        reject(new Error('Timeout waiting for FILE_START_ACK'));
+                    }
+                }, this.START_ACK_TIMEOUT);
+            });
+        }
+
+        // 3. 分块读取并发送文件，从指定的偏移位置开始
+        const startByteOffset = startChunkIndex * this.chunkSize;
+        const fileStream = createReadStream(filePath, { 
+            highWaterMark: this.chunkSize,
+            start: startByteOffset
         });
-
-        // 3. 分块读取并发送文件
-        const fileStream = createReadStream(filePath, { highWaterMark: this.chunkSize });
-        this.fileStream = fileStream as any; // 保存文件流引用
-        let chunkIndex = 0;
-        let bytesSent = 0;
+        this.fileStream = fileStream; // 保存文件流引用
+        let chunkIndex = startChunkIndex;
+        let bytesSent = startByteOffset;
 
         for await (const chunk of fileStream) {
             // 检查是否暂停
@@ -1107,6 +1334,9 @@ export class FileTransferClient {
             // 检查是否取消
             if (this.isCancelled) {
                 console.log('File transfer cancelled');
+                // 清理发送状态
+                this.sendingInProgress = false;
+                this.activeFilePath = null;
                 return;
             }
 
@@ -1145,16 +1375,26 @@ export class FileTransferClient {
 
             // 计算并报告进度
             const progress = Math.min(100, Math.floor((bytesSent / fileSize) * 100));
-            
+
             // 计算传输速率 (bytes/second)
             const elapsedTime = (this.lastUpdateTime - this.startTime) / 1000; // 转换为秒
             this.transferRate = elapsedTime > 0 ? Math.floor(this.bytesSent / elapsedTime) : 0;
-            
+
             if (this.onProgress) {
                 this.onProgress(progress);
             }
 
             chunkIndex++;
+        }
+        // 当 for-await 结束时，可能是因为文件读完，或因为暂停/销毁流导致提前结束。
+        if (this.isPaused || this.isCancelled) {
+            // 如果被暂停或取消，不发送文件结束，等待 resume 或用户操作。
+            this.sendingInProgress = false;
+            // activeFilePath 保留以便 resume 使用（若取消则清理）
+            if (this.isCancelled) {
+                this.activeFilePath = null;
+            }
+            return;
         }
 
         // 等待所有块被确认
@@ -1172,6 +1412,14 @@ export class FileTransferClient {
         }
 
         console.log('File transfer completed');
+        this.sendingInProgress = false;
+        this.activeFilePath = null;
+    }
+
+    // 添加一个新的方法，用于处理从指定位置恢复传输
+    public async resumeTransferFromLastChunk(filePath: string, lastChunkIndex: number): Promise<void> {
+        // 从指定的块索引开始发送文件
+        return this.sendFileFromOffset(filePath, lastChunkIndex + 1);
     }
 
     // 添加暂停传输方法
@@ -1200,6 +1448,24 @@ export class FileTransferClient {
         this.ws.send(this.encodeMessage(resumeMsg));
     }
 
+    // 添加恢复传输并从指定位置开始的方法
+    public resumeTransferFrom(filename: string, lastChunkIndex: number): void {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            throw new Error('WebSocket is not connected');
+        }
+
+        // 设置客户端状态
+        this.lastChunkIndex = lastChunkIndex;
+        this.isPaused = false;
+        
+        // 发送恢复消息
+        const resumeMsg: FileResumeMessage = {
+            type: MessageType.FILE_RESUME,
+            filename: filename
+        };
+        this.ws.send(this.encodeMessage(resumeMsg));
+    }
+
     // 添加取消传输方法
     public cancelTransfer(filename: string): void {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
@@ -1211,8 +1477,7 @@ export class FileTransferClient {
 
         // 如果有文件流，销毁它
         if (this.fileStream) {
-            // 注意：这里需要根据实际的文件流类型来调用适当的方法
-            // this.fileStream.destroy(); // 如果是 ReadableStream
+            this.fileStream.destroy();
         }
 
         const cancelMsg: FileCancelMessage = {
@@ -1240,6 +1505,8 @@ export class FileTransferClient {
             this.ws.send(message);
         }
     }
+
+  
 
     public disconnect() {
         if (this.ws) {

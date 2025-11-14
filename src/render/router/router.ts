@@ -2,6 +2,7 @@ import { createMemoryHistory, createRouter } from "vue-router";
 import HomePage from '../components/HomePage.vue';
 import SendPage from '../components/SendPage.vue';
 import ReceivePage from '../components/ReceivePage.vue';
+import SettingPage from '../components/SettingPage.vue';
 
 const routes = [
   {
@@ -15,6 +16,9 @@ const routes = [
   {
     path: '/receive',
     component: ReceivePage
+  },{
+    path: '/setting',
+    component: SettingPage
   }
 ] as const;
 

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer ,webUtils} from 'electron';
-import {type ServerTransferStatus,type ClientTransferStatus} from '../common/types';
+import {type ServerTransferStatus,type ClientTransferStatus , type AppSettings} from '../common/types';
 
 export interface ElectronAPI {
   // 文件传输服务器控制
@@ -19,9 +19,11 @@ export interface ElectronAPI {
   cancelFileTransfer: (filename: string) => Promise<{ success: boolean; message: string }>;
   
   // 文件传输控制（从接收端发起）
-  pauseFileTransferFromServer: (filename: string) => Promise<{ success: boolean; message: string }>;
-  resumeFileTransferFromServer: (filename: string) => Promise<{ success: boolean; message: string }>;
-  cancelFileTransferFromServer: (filename: string) => Promise<{ success: boolean; message: string }>;
+  pauseFileTransferFromServer: (clientId: string, filename: string) => Promise<{ success: boolean; message: string }>;
+  resumeFileTransferFromServer: (clientId: string, filename: string) => Promise<{ success: boolean; message: string }>;
+  cancelFileTransferFromServer: (clientId: string, filename: string) => Promise<{ success: boolean; message: string }>;
+  
+ 
   
   // 监听接受端事件
   onServerFileTransferStatus: (callback: (data: ServerTransferStatus) => void) => void;
@@ -42,6 +44,10 @@ export interface ElectronAPI {
   setTheme: (theme: 'dark' | 'light') => void;
 
   openDevTools: () => void;
+  // 可选的设置相关接口（主进程可实现）
+  getSettings?: () => Promise<AppSettings>;
+  saveSettings?: (settings: AppSettings) => Promise<{ success: boolean; message: string }>;
+  chooseDirectory?: () => Promise<string | null>;
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -62,9 +68,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cancelFileTransfer: (filename: string) => ipcRenderer.invoke('cancel-file-transfer', filename),
   
   // 文件传输控制（从接收端发起）
-  pauseFileTransferFromServer: (filename: string) => ipcRenderer.invoke('pause-file-transfer-from-server', filename),
-  resumeFileTransferFromServer: (filename: string) => ipcRenderer.invoke('resume-file-transfer-from-server', filename),
-  cancelFileTransferFromServer: (filename: string) => ipcRenderer.invoke('cancel-file-transfer-from-server', filename),
+  pauseFileTransferFromServer: (clientId: string, filename: string) => ipcRenderer.invoke('pause-file-transfer-from-server', clientId, filename),
+  resumeFileTransferFromServer: (clientId: string, filename: string) => ipcRenderer.invoke('resume-file-transfer-from-server', clientId, filename),
+  cancelFileTransferFromServer: (clientId: string, filename: string) => ipcRenderer.invoke('cancel-file-transfer-from-server', clientId,  filename),
   
   // 监听接收端事件
   onServerFileTransferStatus: (callback) => ipcRenderer.on('receive-file-transfer-status', (_, data) => callback(data)),
@@ -88,4 +94,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
    setTheme: (theme: 'dark' | 'light') => ipcRenderer.send('set-theme', theme),
    openDevTools: () => ipcRenderer.send('open-dev-tools'),
+  // 可选的设置相关 ipc 调用（没有主进程处理也安全）
+  getSettings: () => ipcRenderer.invoke('get-settings'),
+  saveSettings: (settings: AppSettings) => ipcRenderer.invoke('save-settings', settings),
+  chooseDirectory: () => ipcRenderer.invoke('choose-directory'),
 } as ElectronAPI);

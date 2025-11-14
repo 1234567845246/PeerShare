@@ -45,7 +45,7 @@
             <div class="progress-bar">
               <div class="progress-fill" :style="{ width: file.progress + '%' }"></div>
             </div>
-            <div class="progress-info">
+            <div class="progress-info" >
               <span>{{ Math.round(file.progress) }}%</span>
             </div>
           </div>
@@ -82,7 +82,7 @@ const receivedFiles = ref<Array<{
   progress: number
   clientId: string
   size:number
-  status: 'complete' | 'in-progress' | 'error'
+  status: 'complete' | 'in-progress' | 'error' | 'cancel' | 'paused'
   receiveRate: number // 添加接收速率
   isPaused?: boolean // 添加暂停状态
 }>>([])
@@ -105,7 +105,7 @@ const connectionInfo = computed(() => {
 
 
 // 获取状态文本
-function getStatusText(status: 'complete' | 'in-progress' | 'error'): string {
+function getStatusText(status: 'complete' | 'in-progress' | 'error' | 'cancel' | 'paused'): string {
   switch (status) {
     case 'complete':
       return '已完成'
@@ -113,6 +113,10 @@ function getStatusText(status: 'complete' | 'in-progress' | 'error'): string {
       return '接收中'
     case 'error':
       return '错误'
+    case 'cancel':
+      return '取消'
+    case 'paused':
+      return '已暂停'
     default:
       return '未知'
   }
@@ -184,7 +188,7 @@ const pauseResumeFile = async (file: { name: string; clientId: string; isPaused?
   try {
     if (file.isPaused) {
       // 恢复传输
-      const result = await window.electronAPI.resumeFileTransferFromServer(file.name);
+      const result = await window.electronAPI.resumeFileTransferFromServer(file.clientId, file.name);
       if (result.success) {
         // 更新 UI 状态
         const fileIndex = receivedFiles.value.findIndex(f => f.name === file.name && f.clientId === file.clientId);
@@ -200,7 +204,7 @@ const pauseResumeFile = async (file: { name: string; clientId: string; isPaused?
       }
     } else {
       // 暂停传输
-      const result = await window.electronAPI.pauseFileTransferFromServer(file.name);
+      const result = await window.electronAPI.pauseFileTransferFromServer(file.clientId, file.name);
       if (result.success) {
         // 更新 UI 状态
         const fileIndex = receivedFiles.value.findIndex(f => f.name === file.name && f.clientId === file.clientId);
@@ -223,14 +227,14 @@ const pauseResumeFile = async (file: { name: string; clientId: string; isPaused?
 // 取消文件传输
 const cancelFile = async (file: { name: string; clientId: string }) => {
   try {
-    const result = await window.electronAPI.cancelFileTransferFromServer(file.name);
+    const result = await window.electronAPI.cancelFileTransferFromServer(file.clientId, file.name);
     if (result.success) {
       // 更新 UI 状态
       const fileIndex = receivedFiles.value.findIndex(f => f.name === file.name && f.clientId === file.clientId);
       if (fileIndex >= 0) {
         const fileToUpdate = receivedFiles.value[fileIndex];
         if (fileToUpdate) {
-          fileToUpdate.status = 'error';
+          fileToUpdate.status = 'cancel';
           fileToUpdate.progress = 0;
           fileToUpdate.isPaused = undefined;
         }
@@ -243,6 +247,8 @@ const cancelFile = async (file: { name: string; clientId: string }) => {
     console.error('Error sending cancel request:', error.message || 'Unknown error');
   }
 }
+
+
 
 // 处理文件传输状态更新
 const handleFileTransferStatus = (data: ServerTransferStatus) => {
@@ -287,7 +293,7 @@ const handleFileTransferStatus = (data: ServerTransferStatus) => {
         fileToUpdate.progress = data.progress || 0;
         fileToUpdate.status = 'in-progress';
         // 更新接收速率
-        fileToUpdate.receiveRate = data.receiveRate;
+        fileToUpdate.receiveRate = data.receiveRate || 0;
         // 确保暂停状态被清除
         fileToUpdate.isPaused = false;
       }
@@ -327,7 +333,7 @@ const handleFileTransferStatus = (data: ServerTransferStatus) => {
     if (existingFileIndex >= 0) {
       const fileToUpdate = receivedFiles.value[existingFileIndex]
       if (fileToUpdate) {
-        fileToUpdate.status = 'error';
+        fileToUpdate.status = 'cancel';
         fileToUpdate.progress = 0;
         fileToUpdate.isPaused = undefined;
       }

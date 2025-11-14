@@ -63,7 +63,8 @@
             <button class="btn primary" @click="sendFile" :disabled="isSending || !isClientConnected || isPaused">
               {{ isSending ? (isPaused ? '已暂停' : '发送中...') : '开始发送' }}
             </button>
-            <button class="btn secondary" @click="pauseResumeFile" :disabled="!isSending || isCompleted" v-if="isSending">
+            <button class="btn secondary" @click="pauseResumeFile" :disabled="!isSending || isCompleted"
+              v-if="isSending">
               <i class="fas fa-pause" v-if="!isPaused"></i>
               <i class="fas fa-play" v-if="isPaused"></i>
               {{ isPaused ? '恢复' : '暂停' }}
@@ -218,20 +219,22 @@ const pauseResumeFile = async () => {
   if (isPaused.value) {
     // 恢复传输
     try {
-      const result = await window.electronAPI.resumeFileTransfer(selectedFile.value.name)
+
+      const result = await window.electronAPI.resumeFileTransfer(selectedFile.value.name);
       if (result.success) {
         isPaused.value = false
         progressMessage.value = '传输已恢复'
       } else {
         progressMessage.value = `恢复失败: ${result.message}`
       }
+
     } catch (error: any) {
       progressMessage.value = `恢复错误: ${error.message || '未知错误'}`
     }
   } else {
     // 暂停传输
     try {
-      const result = await window.electronAPI.pauseFileTransfer(selectedFile.value.name)
+      const result = await window.electronAPI.pauseFileTransfer(selectedFile.value.name);
       if (result.success) {
         isPaused.value = true
         progressMessage.value = '传输已暂停'
@@ -247,7 +250,8 @@ const pauseResumeFile = async () => {
 // 取消发送
 const cancelSend = async () => {
   try {
-    const result = await window.electronAPI.cancelFileTransfer(selectedFile.value?.name || '')
+    if (!selectedFile.value) return
+    const result = await window.electronAPI.cancelFileTransfer(selectedFile.value.name)
     if (result.success) {
       isSending.value = false
       isPaused.value = false

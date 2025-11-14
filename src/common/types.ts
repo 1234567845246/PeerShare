@@ -40,18 +40,15 @@ export type ServerTransferStatus = {
 
 export type ClientTransferStatus = {
     type: 'transfer-start',
-    filename: string;
-    filesize: number;
-    message:string;
+    message: string;
 } | {
     type: 'transfer-progress',
-    filename: string;
+    message: string;
     progress: number;
-    message:string;
-    transferRate: number; // 传输速率 (bytes/second)
+    transferRate?: number;
 } | {
     type: 'transfer-complete',
-    message:string;
+    message: string;
 } | {
     type: 'transfer-error',
     message: string;
@@ -67,4 +64,14 @@ export type ClientTransferStatus = {
     type: 'transfer-cancel',
     filename: string;
     message: string;
+}
+
+
+
+
+export interface AppSettings {
+    overwriteExistingFiles: boolean;
+    defaultServerPort: number;
+    defaultDownloadPath: string;
+    enableNotifications: boolean;
 }

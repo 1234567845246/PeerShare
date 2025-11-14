@@ -12,6 +12,9 @@
         <button class="nav-btn" :class="{ active: route.path === '/receive' }" @click="goToReceive">
           接收文件
         </button>
+        <button class="nav-btn" :class="{ active: route.path === '/setting' }" @click="goToSetting">
+          设置
+        </button>
       </div>
       <button class="theme-toggle" id="theme-toggle" title="切换主题" @click="toggleTheme">
         <i class="fas fa-moon"></i>
@@ -37,6 +40,10 @@ const goToSend = () => {
 const goToReceive = () => {
   router.push('/receive')
 }
+
+const goToSetting = () => {
+  router.push('/setting')
+} 
 
 const toggleTheme = () => {
   const currentTheme = document.documentElement.getAttribute('data-theme')

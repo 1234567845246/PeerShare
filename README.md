@@ -1,5 +1,12 @@
-# Vue 3 + TypeScript + Vite
+# PeerShare - File Transfer Application
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+PeerShare is a cross-platform file transfer application built with Electron, Vue 3, and TypeScript. It allows users to easily send and receive files between devices on the same network.
 
-Learn more about the recommended Project Setup and IDE Support in the [Vue Docs TypeScript Guide](https://vuejs.org/guide/typescript/overview.html#project-setup).
+## Features
+- Send files to other devices
+- Receive files from other devices
+- Simple and intuitive user interface
+- Cross-platform support (Windows, macOS, Linux)
+
+## Development
+This project uses Vite as the build tool with Vue 3 `<script setup>` SFCs.
