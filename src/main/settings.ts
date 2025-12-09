@@ -1,7 +1,7 @@
 
 import { app } from "electron";
 import { join } from "path";
-import { readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { type AppSettings } from "../common/types";
 
 app.setPath('userData', join(app.getPath('appData'), 'PeerShare'));
@@ -13,6 +13,7 @@ export class Settings {
         defaultServerPort: 8080,
         defaultDownloadPath: app.getPath('downloads'),
         enableNotifications: true,
+        exitOrMinimizeToTray: false,
     };
 
     constructor() {
@@ -20,10 +21,11 @@ export class Settings {
     }
 
     public getSettingsSync(): AppSettings {
-        try {
+        if(existsSync(this.settingpath)){
             const data = readFileSync(this.settingpath, 'utf-8');
             return JSON.parse(data) as AppSettings;
-        } catch (error) {
+        }else{
+            writeFileSync(this.settingpath, JSON.stringify(Settings.defaultSettings, null, 4), 'utf-8');
             return Settings.defaultSettings;
         }
     }

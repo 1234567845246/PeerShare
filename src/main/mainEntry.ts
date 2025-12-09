@@ -1,15 +1,16 @@
 // src\main\mainEntry.ts
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme } from 'electron'
 import { join } from 'path'
 import {Settings} from './settings'
+import ProgressTracker from './progressTracker'
 import { FileTransferServer, FileTransferClient } from './fileTransferServer'
-import { type ServerTransferStatus } from '../common/types'
-import { formatRate } from '../common/tools';
+import { type ServerTransferStatus ,type ClientTransferStatus} from '../common/types'
 
 class Application {
     private mainWindow: BrowserWindow | null = null;
     private fileServer: FileTransferServer | null = null;
     private fileClient: FileTransferClient | null = null;
+    private progressTracker: ProgressTracker | null = null;
     private settings: Settings | null = null;
 
     constructor() {
@@ -28,7 +29,14 @@ class Application {
                 this.fileServer = new FileTransferServer(port);
                 
                 // 设置服务端进度回调，将进度信息发送到渲染进程
-                this.fileServer.setServerProgressCallback((status: ServerTransferStatus) => {
+                this.fileServer.onProgress(( status: ServerTransferStatus) => {
+               
+                    if(status.type === 'transfer-complete' || status.type === 'transfer-error'){
+                        this.progressTracker?.completeProgress();
+                    }
+                    if(status.type === 'transfer-progress' && typeof status.progress === 'number'){
+                        this.progressTracker?.updateProgress(status.progress / 100);
+                    }
                     this.mainWindow?.webContents.send('receive-file-transfer-status', status);
                 });
                 
@@ -115,33 +123,21 @@ class Application {
                     return { success: false, message: 'File client connection is not open' };
                 }
                 
-                // 发送状态更新到渲染进程
-                this.mainWindow?.webContents.send('send-file-transfer-status', {
-                    type: 'transfer-start',
-                    message: `Starting to send file: ${filePath}`
-                });
+               
                 
                 // 设置进度回调函数
-                this.fileClient.setProgressCallback((progress: number) => {
-                    // 计算传输速率
-                    const transferRate = this.fileClient ? (this.fileClient as any).transferRate || 0 : 0;
-                    
-                    this.mainWindow?.webContents.send('send-file-transfer-status', {
-                        type: 'transfer-progress',
-                        message: `Transfer progress: ${progress}%` + (transferRate > 0 ? ` ${formatRate(transferRate)}` : ''),
-                        progress: progress,
-                        transferRate: transferRate
-                    });
+                this.fileClient.setProgressCallback((status: ClientTransferStatus) => {
+          
+                    if(status.type === 'transfer-complete' || status.type === 'transfer-error'){
+                        this.progressTracker?.completeProgress();
+                    }
+                    if(status.type === 'transfer-progress' && typeof status.progress === 'number'){
+                        this.progressTracker?.updateProgress(status.progress / 100);
+                    }
+                    this.mainWindow?.webContents.send('send-file-transfer-status', status);
                 });
                 
                 await this.fileClient.sendFile(filePath);
-                
-                this.mainWindow?.webContents.send('send-file-transfer-status', {
-                    type: 'transfer-complete',
-                    message: 'File transfer completed successfully'
-                });
-                
-                return { success: true, message: 'File sent successfully' };
             } catch (error: any) {
                 // 确保在发送失败时清理 fileClient
                 if (this.fileClient) {
@@ -334,6 +330,20 @@ class Application {
             this.mainWindow?.webContents.openDevTools({ mode: 'undocked' });
         })
 
+        ipcMain.handle('choose-directory', async (_,title:string) => {
+        
+            const result = await dialog.showOpenDialog(this.mainWindow!, {
+                title,
+                defaultPath:this.settings?.getSettingsSync().defaultDownloadPath || app.getPath('downloads'),
+                properties: ['openDirectory','createDirectory'],
+            });
+
+            if (!result.canceled && result.filePaths.length > 0) {
+                return result.filePaths[0];    
+            }
+            return null;
+            
+        });
 
     }
 
@@ -362,7 +372,9 @@ class Application {
             this.mainWindow = null;
         })
         Menu.setApplicationMenu(null);
-        
+        this.progressTracker = new ProgressTracker(this.mainWindow);
+
+         // 根据命令行参数加载不同的URL或文件
         if (process.argv[2]) {
             this.mainWindow.loadURL(process.argv[2]);
         } else {

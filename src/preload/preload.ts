@@ -11,7 +11,7 @@ export interface ElectronAPI {
   disconnectFileClient: () => Promise<{ success: boolean; message: string }>;
   
   // 文件发送
-  sendFile: (filePath: string) => Promise<{ success: boolean; message: string }>;
+  sendFile: (filePath: string) => Promise<void>;
   
   // 文件传输控制（从发送端发起）
   pauseFileTransfer: (filename: string) => Promise<{ success: boolean; message: string }>;
@@ -47,7 +47,7 @@ export interface ElectronAPI {
   // 可选的设置相关接口（主进程可实现）
   getSettings?: () => Promise<AppSettings>;
   saveSettings?: (settings: AppSettings) => Promise<{ success: boolean; message: string }>;
-  chooseDirectory?: () => Promise<string | null>;
+  chooseDirectory: (title: string) => Promise<string | null>;
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -97,5 +97,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 可选的设置相关 ipc 调用（没有主进程处理也安全）
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings: AppSettings) => ipcRenderer.invoke('save-settings', settings),
-  chooseDirectory: () => ipcRenderer.invoke('choose-directory'),
+  chooseDirectory: (title: string) => ipcRenderer.invoke('choose-directory', title),
 } as ElectronAPI);

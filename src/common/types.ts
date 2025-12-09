@@ -74,4 +74,5 @@ export interface AppSettings {
     defaultServerPort: number;
     defaultDownloadPath: string;
     enableNotifications: boolean;
+    exitOrMinimizeToTray: boolean;
 }

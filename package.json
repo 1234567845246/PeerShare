@@ -8,6 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fortawesome/fontawesome-free": "^7.1.0",
     "esbuild": "^0.25.12",
     "ws": "^8.18.3"
   },

@@ -13,14 +13,12 @@
 import { onMounted,KeepAlive } from 'vue';
 import Navigation from './components/Navigation.vue'
 import { RouterView } from 'vue-router'
+import { getShortcutManager } from './shortcuts/shortcuts';
 
 onMounted(()=>{
-  document.addEventListener('keydown', (e: KeyboardEvent) => {
-    const cmdOrCtrl = navigator.platform.includes('Mac') ? e.metaKey : e.ctrlKey;
-    if(cmdOrCtrl && e.shiftKey && e.key == 'I'){
+  getShortcutManager().addShortcut('ctrl+i', () => {
       window.electronAPI.openDevTools();
-    }
-  })
+  });
 })
 </script>
 

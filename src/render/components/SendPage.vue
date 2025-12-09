@@ -44,7 +44,6 @@
               <div class="file-name">{{ selectedFile.name }}</div>
               <div class="file-size-rate">
                 <div class="file-size">{{ formatFileSize(selectedFile.size) }}</div>
-                <div class="file-rate">{{ formatRate(transferRate) }}</div>
               </div>
             </div>
           </div>
@@ -60,16 +59,17 @@
           </div>
 
           <div class="action-buttons-row">
-            <button class="btn primary" @click="sendFile" :disabled="isSending || !isClientConnected || isPaused">
-              {{ isSending ? (isPaused ? '已暂停' : '发送中...') : '开始发送' }}
+            <button class="btn primary" @click="sendFile" v-show="isSending || !isCompleted">
+              <i class="fas fa-paper-plane"></i>
+              发送文件  
             </button>
-            <button class="btn secondary" @click="pauseResumeFile" :disabled="!isSending || isCompleted"
-              v-if="isSending">
+            <button class="btn secondary" @click="pauseResumeFile" 
+              v-show="isPaused || isSending">
               <i class="fas fa-pause" v-if="!isPaused"></i>
               <i class="fas fa-play" v-if="isPaused"></i>
               {{ isPaused ? '恢复' : '暂停' }}
             </button>
-            <button class="btn secondary" @click="cancelSend" :disabled="!isSending">
+            <button class="btn secondary" @click="cancelSend" v-show="isCancel || isSending" >
               <i class="fas fa-times"></i>
               取消
             </button>
@@ -94,11 +94,11 @@ const isFileSelected = ref(false)
 const isSending = ref(false)
 const isPaused = ref(false)
 const isCompleted = ref(false)
+const isCancel = ref(false)
 const progress = ref(0)
 const progressMessage = ref('准备发送')
 const isClientConnected = ref(false)
-const clientUrl = ref('ws://localhost:8080')
-const transferRate = ref(0) // 添加传输速率
+const clientUrl = ref('ws://localhost:8080');
 let filePath = '' // 存储文件路径
 
 // 选择文件
@@ -150,6 +150,7 @@ const connectClient = async () => {
     } else {
       progressMessage.value = `连接失败: ${result.message}`
     }
+    console.log('Connect client result:', result);
   } catch (error: any) {
     progressMessage.value = `连接错误: ${error.message || '未知错误'}`
   }
@@ -185,6 +186,7 @@ const sendFile = async () => {
   isSending.value = true
   isPaused.value = false
   isCompleted.value = false
+  isCancel.value = false
   progress.value = 0
   progressMessage.value = '准备发送文件...'
 
@@ -193,14 +195,8 @@ const sendFile = async () => {
     filePath = window.electronAPI.getPathForFile(selectedFile.value)
 
     // 发送文件
-    const result = await window.electronAPI.sendFile(filePath)
+    await window.electronAPI.sendFile(filePath)
 
-    if (result.success) {
-      progressMessage.value = `文件发送成功: ${result.message}`
-      isCompleted.value = true
-    } else {
-      progressMessage.value = `文件发送失败: ${result.message}`
-    }
   } catch (error: any) {
     console.error('发送文件失败:', error)
     progressMessage.value = `发送文件错误: ${error.message || '未知错误'}`
@@ -221,10 +217,7 @@ const pauseResumeFile = async () => {
     try {
 
       const result = await window.electronAPI.resumeFileTransfer(selectedFile.value.name);
-      if (result.success) {
-        isPaused.value = false
-        progressMessage.value = '传输已恢复'
-      } else {
+      if (!result.success) {
         progressMessage.value = `恢复失败: ${result.message}`
       }
 
@@ -235,10 +228,7 @@ const pauseResumeFile = async () => {
     // 暂停传输
     try {
       const result = await window.electronAPI.pauseFileTransfer(selectedFile.value.name);
-      if (result.success) {
-        isPaused.value = true
-        progressMessage.value = '传输已暂停'
-      } else {
+      if (!result.success) {
         progressMessage.value = `暂停失败: ${result.message}`
       }
     } catch (error: any) {
@@ -252,12 +242,7 @@ const cancelSend = async () => {
   try {
     if (!selectedFile.value) return
     const result = await window.electronAPI.cancelFileTransfer(selectedFile.value.name)
-    if (result.success) {
-      isSending.value = false
-      isPaused.value = false
-      progress.value = 0
-      progressMessage.value = '已取消发送'
-    } else {
+    if (!result.success) {
       progressMessage.value = `取消失败: ${result.message}`
     }
   } catch (error: any) {
@@ -267,29 +252,31 @@ const cancelSend = async () => {
 
 // 处理文件传输状态更新
 const handleFileTransferStatus = (data: ClientTransferStatus) => {
+  console.log('Send file transfer status:', data);
   if (data.type === 'transfer-progress') {
     progress.value = data.progress;
     // 更新传输速率
     if ('transferRate' in data && data.transferRate) {
-      transferRate.value = data.transferRate;
       // 在消息中显示传输速率
-      progressMessage.value = `传输进度: ${data.progress}% (${formatRate(data.transferRate)} KB/s)`;
+      progressMessage.value = `传输进度: ${data.progress}% (${formatRate(data.transferRate)})`;
     }
   }
 
   if (data.type === 'transfer-pause') {
     isPaused.value = true;
+    isSending.value = false;
     progressMessage.value = data.message || '传输已暂停';
   }
 
   if (data.type === 'transfer-resume') {
     isPaused.value = false;
+    isSending.value = true;
     progressMessage.value = data.message || '传输已恢复';
   }
 
   if (data.type === 'transfer-cancel') {
     isSending.value = false;
-    isPaused.value = false;
+    isCancel.value = true;
     progressMessage.value = data.message || '传输已取消';
   }
 
@@ -301,7 +288,6 @@ const handleFileTransferStatus = (data: ClientTransferStatus) => {
   if (data.type === 'transfer-complete') {
     isSending.value = false
     isCompleted.value = true
-    transferRate.value = 0;
   }
 }
 

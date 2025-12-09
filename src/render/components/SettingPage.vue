@@ -28,6 +28,10 @@
                 <input type="checkbox" id="notifications" v-model="setting.enableNotifications" />
                 <label for="notifications">启用通知</label>
             </div>
+            <div class="form-row checkbox-row">
+                <input type="checkbox" id="tray" v-model="setting.exitOrMinimizeToTray" />
+                <label for="tray">退出或最小化到系统托盘</label>
+            </div>
             <div class="action-row">
                 <button class="btn primary" @click="saveSettings">保存</button>
                 <button class="btn" @click="resetDefaults">重置为默认</button>
@@ -46,6 +50,7 @@ const statusMessage = ref('')
 let defaultSettings = {
     overwriteExistingFiles: false,
     enableNotifications: false,
+    exitOrMinimizeToTray: false,
     defaultServerPort: 8080,
     defaultDownloadPath: ''
 }
@@ -85,11 +90,18 @@ const loadSettings = async () => {
 // 选择目录（通过主进程）
 const pickDirectory = async () => {
     
-    window.showDirectoryPicker().then((files: FileSystemDirectoryHandle) => {
-
-    }).catch((err: any) => {
+    try {
+        if (window.electronAPI && window.electronAPI.chooseDirectory) {
+            const dir = await window.electronAPI.chooseDirectory('选择默认下载目录')
+            if (dir) {
+                setting.defaultDownloadPath = dir
+            }
+        } else {
+            statusMessage.value = '无法打开目录选择对话框'
+        }
+    } catch (err: any) {
         statusMessage.value = `选择目录失败: ${err?.message || err}`
-    })
+    }
 }
 
 // 保存设置
@@ -99,7 +111,8 @@ const saveSettings = async () => {
             overwriteExistingFiles: !!setting.overwriteExistingFiles,
             defaultServerPort: Number(setting.defaultServerPort) || defaultSettings.defaultServerPort,
             defaultDownloadPath: setting.defaultDownloadPath || defaultSettings.defaultDownloadPath,
-            enableNotifications: !!setting.enableNotifications
+            enableNotifications: !!setting.enableNotifications,
+            exitOrMinimizeToTray: !!setting.exitOrMinimizeToTray
         }
 
         if (window.electronAPI && window.electronAPI.saveSettings) {
@@ -152,7 +165,6 @@ onMounted(() => {
     padding: 18px;
     border-radius: 10px;
     box-shadow: var(--shadow-light);
-    max-width: 720px;
 }
 
 .form-row {
@@ -181,7 +193,8 @@ onMounted(() => {
     padding: 8px 10px;
     border-radius: 6px;
     border: 1px solid var(--border-color);
-    background: transparent
+    background-color: transparent;
+    color: va;
 }
 
 .checkbox-row {
@@ -205,17 +218,26 @@ onMounted(() => {
     border-radius: 6px;
     border: none;
     cursor: pointer;
-    background: var(--bg-button-muted);
+    background-color: var(--bg-button-muted);
     color: var(--text-light)
 }
 
 .btn.small {
     padding: 6px 8px;
-    font-size: 13px
+    font-size: 13px;
+    background-color: var(--bg-button);
+}
+
+.btn.small:hover {
+    background-color: var(--bg-button-hover);
 }
 
 .btn.primary {
-    background: var(--bg-button)
+    background-color: var(--bg-button)
+}
+
+.btn.primary:hover {
+    background-color: var(--bg-button-hover)
 }
 
 @media (max-width: 768px) {
