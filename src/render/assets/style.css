@@ -5,6 +5,8 @@
   --bg-header: linear-gradient(90deg, #4f6df5, #3a56e6);
   --bg-button: #4f6df5;
   --bg-button-hover: #3a56e6;
+  --bg-button-muted: #a0aec0;
+  --bg-button-muted-hover: #718096;
   --bg-send: linear-gradient(135deg, #43cea2, #185a9d);
   --bg-receive: linear-gradient(135deg, #ff7e5f, #feb47b);
   --text-primary: #333;
@@ -15,6 +17,52 @@
   --shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
   --shadow-light: 0 3px 10px rgba(0, 0, 0, 0.08);
   --transition: all 0.3s ease;
+
+  /* Select Component */
+  --select-bg: white;
+  --select-border: #dcdfe6;
+  --select-border-hover: #c0c4cc;
+  --select-border-focus: #409eff;
+  --select-bg-hover: #f5f7fa;
+  --select-bg-focus: #f0f9ff;
+  --select-text-color: #303133;
+  --select-placeholder-color: #c0c4cc;
+  --select-disabled-bg: #f5f7fa;
+  --select-disabled-border: #e4e7ed;
+  --select-disabled-text: #c0c4cc;
+  --select-description-bg: #f8f9fa;
+  --select-description-border: #ebeef5;
+  --select-description-text: #606266;
+  --select-secondary-text: #909399;
+  --select-error-bg: #fef0f0;
+  --select-error-border: #fde2e2;
+  --select-error-text: #f56c6c;
+  --select-clear-bg: #f0f0f0;
+  --select-clear-bg-hover: #e0e0e0;
+
+  /* Notification Component */
+  --notification-info-bg-start: #e3f2fd;
+  --notification-info-bg-end: #bbdefb;
+  --notification-info-border: #2196f3;
+  --notification-info-text: #1565c0;
+  --notification-success-bg-start: #e8f5e9;
+  --notification-success-bg-end: #c8e6c9;
+  --notification-success-border: #4caf50;
+  --notification-success-text: #2e7d32;
+  --notification-error-bg-start: #ffebee;
+  --notification-error-bg-end: #ffcdd2;
+  --notification-error-border: #f44336;
+  --notification-error-text: #c62828;
+  --notification-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  --notification-progress-bg: rgba(0, 0, 0, 0.1);
+
+  /* Option Component */
+  --option-bg-hover: #f5f7fa;
+  --option-bg-selected: #f0f9ff;
+  --option-text-selected: #409eff;
+  --option-text-disabled: #c0c4cc;
+  --option-badge-text: #606266;
+  --option-badge-bg: rgba(0, 0, 0, 0.03);
 }
 
 [data-theme="dark"] {
@@ -24,6 +72,8 @@
   --bg-header: linear-gradient(90deg, #1e3a8a, #1e40af);
   --bg-button: #3b82f6;
   --bg-button-hover: #2563eb;
+  --bg-button-muted: #6b7280;
+  --bg-button-muted-hover: #4b5563;
   --bg-send: linear-gradient(135deg, #059669, #065f46);
   --bg-receive: linear-gradient(135deg, #dc2626, #b91c1c);
   --text-primary: #f7fafc;
@@ -33,6 +83,52 @@
   --border-color: #4a5568;
   --shadow: 0 15px 35px rgba(0, 0, 0, 0.4);
   --shadow-light: 0 3px 10px rgba(0, 0, 0, 0.2);
+
+  /* Select Component - Dark Mode */
+  --select-bg: #2d3748;
+  --select-border: #4a5568;
+  --select-border-hover: #5a6580;
+  --select-border-focus: #60a5fa;
+  --select-bg-hover: #374151;
+  --select-bg-focus: #1e3a50;
+  --select-text-color: #e2e8f0;
+  --select-placeholder-color: #9ca3af;
+  --select-disabled-bg: #374151;
+  --select-disabled-border: #4a5568;
+  --select-disabled-text: #6b7280;
+  --select-description-bg: #374151;
+  --select-description-border: #4a5568;
+  --select-description-text: #d1d5db;
+  --select-secondary-text: #9ca3af;
+  --select-error-bg: #3f1e1e;
+  --select-error-border: #5a2020;
+  --select-error-text: #fca5a5;
+  --select-clear-bg: #4a5568;
+  --select-clear-bg-hover: #5a6580;
+
+  /* Notification Component - Dark Mode */
+  --notification-info-bg-start: #1e3a50;
+  --notification-info-bg-end: #2d5a7b;
+  --notification-info-border: #60a5fa;
+  --notification-info-text: #93c5fd;
+  --notification-success-bg-start: #1e3a2a;
+  --notification-success-bg-end: #2d5a3f;
+  --notification-success-border: #34d399;
+  --notification-success-text: #6ee7b7;
+  --notification-error-bg-start: #3f1e1e;
+  --notification-error-bg-end: #5a2a2a;
+  --notification-error-border: #f87171;
+  --notification-error-text: #fca5a5;
+  --notification-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --notification-progress-bg: rgba(255, 255, 255, 0.1);
+
+  /* Option Component - Dark Mode */
+  --option-bg-hover: #374151;
+  --option-bg-selected: #1e3a50;
+  --option-text-selected: #60a5fa;
+  --option-text-disabled: #6b7280;
+  --option-badge-text: #d1d5db;
+  --option-badge-bg: rgba(255, 255, 255, 0.08);
 }
 
 

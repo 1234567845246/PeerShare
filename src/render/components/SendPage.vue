@@ -84,6 +84,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { formatFileSize, formatRate } from '../../common/tools'
 import type { ClientTransferStatus } from '../../common/types'
+import { useAppSettings } from '../setting/setting'
 
 // 组件引用
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -98,7 +99,7 @@ const isCancel = ref(false)
 const progress = ref(0)
 const progressMessage = ref('准备发送')
 const isClientConnected = ref(false)
-const clientUrl = ref('ws://localhost:8080');
+const clientUrl = ref(`ws://localhost:${useAppSettings().settings.defaultServerPort}`);
 let filePath = '' // 存储文件路径
 
 // 选择文件

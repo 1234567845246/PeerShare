@@ -1,17 +1,19 @@
 // src\main\mainEntry.ts
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme } from 'electron'
 import { join } from 'path'
-import {Settings} from './settings'
+
 import ProgressTracker from './progressTracker'
 import { FileTransferServer, FileTransferClient } from './fileTransferServer'
 import { type ServerTransferStatus ,type ClientTransferStatus} from '../common/types'
+import { settings } from './settings'
+import  SystemTray from './tray'
 
 class Application {
     private mainWindow: BrowserWindow | null = null;
     private fileServer: FileTransferServer | null = null;
     private fileClient: FileTransferClient | null = null;
     private progressTracker: ProgressTracker | null = null;
-    private settings: Settings | null = null;
+    private systemTray:SystemTray | null = null;
 
     constructor() {
         this.createmainWindow();
@@ -304,11 +306,15 @@ class Application {
 
         ipcMain.handle('get-settings', async () => {
             try {
-                if (!this.settings) {
-                    this.settings = new Settings();
-                }
-                const settings = this.settings.getSettingsSync();
-                return settings;
+                return settings.settingData;;
+            } catch (error: any) {
+                return null;
+            }
+        });
+
+        ipcMain.handle('get-default-settings', async () => {
+            try {
+                return settings.getdefaultSettings();   
             } catch (error: any) {
                 return null;
             }
@@ -316,10 +322,7 @@ class Application {
 
         ipcMain.handle('save-settings', async (_, newSettings) => {
             try {
-                if (!this.settings) {
-                    this.settings = new Settings();
-                }
-                this.settings.setSettingsSync(newSettings);
+                settings.setSettingsSync(newSettings);
                 return { success: true, message: 'Settings saved successfully' };
             } catch (error: any) {
                 return { success: false, message: error.message || 'Error saving settings' };
@@ -334,7 +337,7 @@ class Application {
         
             const result = await dialog.showOpenDialog(this.mainWindow!, {
                 title,
-                defaultPath:this.settings?.getSettingsSync().defaultDownloadPath || app.getPath('downloads'),
+                defaultPath:settings.settingData.defaultDownloadPath || app.getPath('downloads'),
                 properties: ['openDirectory','createDirectory'],
             });
 
@@ -372,6 +375,7 @@ class Application {
             this.mainWindow = null;
         })
         Menu.setApplicationMenu(null);
+        this.systemTray = new SystemTray(this.mainWindow);
         this.progressTracker = new ProgressTracker(this.mainWindow);
 
          // 根据命令行参数加载不同的URL或文件

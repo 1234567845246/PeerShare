@@ -72,11 +72,12 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { formatFileSize ,formatRate } from '../../common/tools'
 import {type ServerTransferStatus } from '../../common/types'
+import { useAppSettings } from '../setting/setting'
 
 
 // 响应式数据
 const isReceiving = ref(false)
-const serverPort = ref(8080)
+const serverPort = ref(useAppSettings().settings.defaultServerPort)
 const receivedFiles = ref<Array<{
   name: string
   progress: number

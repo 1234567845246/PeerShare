@@ -1,10 +1,11 @@
 import WebSocket, { WebSocketServer } from 'ws';
-import { createReadStream, statSync, createWriteStream, WriteStream, ReadStream } from 'fs';
-import { join, basename } from 'path';
+import { createReadStream, statSync, createWriteStream, WriteStream, ReadStream, existsSync } from 'fs';
+import { join, basename, parse } from 'path';
 import { type ClientTransferStatus, type ServerTransferStatus } from '../common/types';
 import EventEmitter from 'events';
 import { MessageCodec, MessageType, type FileStartMessage, type FileStartAckMessage, type FileChunkMessage, type FileChunkAckMessage, type FileEndMessage, type FilePauseMessage, type FilePauseAckMessage, type FileResumeMessage, type FileResumeAckMessage, type FileCancelMessage, type FileCancelAckMessage, type FileControlMessage, type FileMessage } from '../common/MessageCodec';
 import { randomUUID } from 'crypto';
+import { settings } from './settings';
 
 
 
@@ -33,7 +34,7 @@ export class FileTransferServer extends EventEmitter {
     private fileInfos: Map<WebSocket, FileInfos>; // 存储每个连接的文件信息
     private onProgressCallbacks: (status: ServerTransferStatus) => void; // 服务器连接的进度回调函数
 
-    constructor(port: number = 8080) {
+    constructor(port: number = settings.settingData.defaultServerPort || 8080) {
         super();
         this.port = port;
         this.clients = new Set();
@@ -158,7 +159,18 @@ export class FileTransferServer extends EventEmitter {
         console.log(`Starting to receive file: ${message.filename} (${message.fileSize} bytes)`);
 
         // 创建文件写入流
-        const filePath = join(__dirname, message.filename);
+        let filePath = join(settings.settingData.defaultDownloadPath || __dirname, message.filename);
+        if(!settings.settingData.overwriteExistingFiles){
+            let uniqueFilePath = filePath;
+            let count = 1;
+            while (existsSync(uniqueFilePath)) {
+                const parsedPath = parse(filePath);
+                uniqueFilePath = join(parsedPath.dir, `${parsedPath.name}(${count})${parsedPath.ext}`);
+                count++;
+            }
+            console.log(`File exists. Saving as: ${uniqueFilePath}`);
+            filePath = uniqueFilePath;
+        }
         const writeStream = createWriteStream(filePath);
 
         this.fileStreams.set(ws, writeStream);

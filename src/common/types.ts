@@ -73,6 +73,57 @@ export interface AppSettings {
     overwriteExistingFiles: boolean;
     defaultServerPort: number;
     defaultDownloadPath: string;
-    enableNotifications: boolean;
+    NotificationType: 'system' | 'custom' | 'none';
     exitOrMinimizeToTray: boolean;
+}
+
+export interface SystemNotificationOptions {
+  title: string;
+  body: string;
+  icon?: string;
+  silent?: boolean;
+  requireInteraction?: boolean;
+  tag?: string;
+  timestamp?: number;
+}
+
+
+
+export type NotificationType = 'info' | 'error' | 'success';
+
+
+
+export interface SelectOption {
+  value: string | number;
+  label: string;
+  description?: string;
+  disabled?: boolean;
+  default?:boolean;
+}
+
+export interface SelectProps {
+  modelValue?: string | number;
+  options?: SelectOption[];
+  placeholder?: string;
+  disabled?: boolean;
+  clearable?: boolean;
+  filterable?: boolean;
+  size?: 'small' | 'medium' | 'large';
+  width?: string;
+  showDescription?: boolean;
+}
+
+export interface SelectEmits {
+  (e: 'update:modelValue', value: string | number): void;
+  (e: 'change', value: string | number, option: SelectOption): void;
+  (e: 'clear'): void;
+  (e: 'visible-change', visible: boolean): void;
+}
+
+export interface OptionProps {
+  value: string | number;
+  label: string;
+  description?: string;
+  disabled?: boolean;
+  default?:boolean
 }

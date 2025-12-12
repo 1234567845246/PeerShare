@@ -45,8 +45,9 @@ export interface ElectronAPI {
 
   openDevTools: () => void;
   // 可选的设置相关接口（主进程可实现）
-  getSettings?: () => Promise<AppSettings>;
-  saveSettings?: (settings: AppSettings) => Promise<{ success: boolean; message: string }>;
+  getSettings: () => Promise<AppSettings>;
+  saveSettings: (settings: AppSettings) => Promise<{ success: boolean; message: string }>;
+  getdefaultSettings: () =>Promise<AppSettings>;
   chooseDirectory: (title: string) => Promise<string | null>;
 }
 
@@ -97,5 +98,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 可选的设置相关 ipc 调用（没有主进程处理也安全）
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings: AppSettings) => ipcRenderer.invoke('save-settings', settings),
+  getdefaultSettings: () => ipcRenderer.invoke('get-default-settings'),
   chooseDirectory: (title: string) => ipcRenderer.invoke('choose-directory', title),
 } as ElectronAPI);

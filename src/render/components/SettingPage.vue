@@ -8,7 +8,8 @@
         <div class="card setting-card">
             <div class="form-row">
                 <label class="form-label">默认接收端口</label>
-                <input type="number" v-model.number="setting.defaultServerPort" class="form-input" min="1" max="65535" />
+                <input type="number" v-model.number="setting.defaultServerPort" class="form-input" min="1"
+                    max="65535" />
             </div>
 
             <div class="form-row">
@@ -24,13 +25,18 @@
                 <input type="checkbox" id="overwrite" v-model="setting.overwriteExistingFiles" />
                 <label for="overwrite">是否覆盖原有文件</label>
             </div>
-            <div class="form-row checkbox-row">
-                <input type="checkbox" id="notifications" v-model="setting.enableNotifications" />
-                <label for="notifications">启用通知</label>
-            </div>
+        
             <div class="form-row checkbox-row">
                 <input type="checkbox" id="tray" v-model="setting.exitOrMinimizeToTray" />
-                <label for="tray">退出或最小化到系统托盘</label>
+                <label for="tray">窗口关闭时最小化到系统托盘</label>
+            </div>
+            <div class="form-row">
+                <label class="form-label">通知类型</label>
+                <Select v-model="setting.NotificationType" placeholder="选择通知类型" >
+                    <Option value="system" label="系统通知" description="使用系统默认的通知方式" />
+                    <Option value="custom" label="自定义通知" description="使用自定义的通知样式和行为" />
+                    <Option value="none" label="无通知" description="不显示任何通知消息" default/>
+                </Select>
             </div>
             <div class="action-row">
                 <button class="btn primary" @click="saveSettings">保存</button>
@@ -43,53 +49,27 @@
 
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue'
+import { reactive, ref, onMounted, toRefs } from 'vue'
+import { useAppSettings } from '../setting/setting'
+import Select from './Select.vue'
+import Option from './Option.vue'
 
 const statusMessage = ref('')
 
-let defaultSettings = {
-    overwriteExistingFiles: false,
-    enableNotifications: false,
-    exitOrMinimizeToTray: false,
-    defaultServerPort: 8080,
-    defaultDownloadPath: ''
-}
-
-const setting = reactive({ ...defaultSettings })
+const setting = reactive(toRefs(useAppSettings().settings))
 
 // 从主进程或 localStorage 加载设置
 const loadSettings = async () => {
-    try {
-        if (window.electronAPI && window.electronAPI.getSettings) {
-            const s = await window.electronAPI.getSettings()
-            if (s) {
-                setting.overwriteExistingFiles = !!s.overwriteExistingFiles
-                setting.defaultServerPort = s.defaultServerPort ?? defaultSettings.defaultServerPort
-                setting.defaultDownloadPath = s.defaultDownloadPath ?? defaultSettings.defaultDownloadPath
-                setting.enableNotifications = !!s.enableNotifications
-                statusMessage.value = '已加载设置'
-                return
-            }
-        }
-
-        // fallback: localStorage
-        const raw = localStorage.getItem('peershare-settings')
-        if (raw) {
-            const s = JSON.parse(raw)
-            setting.overwriteExistingFiles = !!s.overwriteExistingFiles
-            setting.defaultServerPort = s.defaultServerPort ?? defaultSettings.defaultServerPort
-            setting.defaultDownloadPath = s.defaultDownloadPath ?? defaultSettings.defaultDownloadPath
-            setting.enableNotifications = !!s.enableNotifications
-            statusMessage.value = '已加载本地设置'
-        }
-    } catch (err: any) {
-        statusMessage.value = `加载设置失败: ${err?.message || err}`
-    }
+    setting.defaultServerPort = useAppSettings().settings.defaultServerPort
+    setting.defaultDownloadPath = useAppSettings().settings.defaultDownloadPath
+    setting.overwriteExistingFiles = useAppSettings().settings.overwriteExistingFiles
+    setting.NotificationType = useAppSettings().settings.NotificationType
+    setting.exitOrMinimizeToTray = useAppSettings().settings.exitOrMinimizeToTray
 }
 
 // 选择目录（通过主进程）
 const pickDirectory = async () => {
-    
+
     try {
         if (window.electronAPI && window.electronAPI.chooseDirectory) {
             const dir = await window.electronAPI.chooseDirectory('选择默认下载目录')
@@ -106,34 +86,18 @@ const pickDirectory = async () => {
 
 // 保存设置
 const saveSettings = async () => {
-    try {
-        const payload = {
-            overwriteExistingFiles: !!setting.overwriteExistingFiles,
-            defaultServerPort: Number(setting.defaultServerPort) || defaultSettings.defaultServerPort,
-            defaultDownloadPath: setting.defaultDownloadPath || defaultSettings.defaultDownloadPath,
-            enableNotifications: !!setting.enableNotifications,
-            exitOrMinimizeToTray: !!setting.exitOrMinimizeToTray
-        }
-
-        if (window.electronAPI && window.electronAPI.saveSettings) {
-            await window.electronAPI.saveSettings(payload)
-            statusMessage.value = '设置已保存'
-        } else {
-            // fallback: localStorage
-            localStorage.setItem('peershare-settings', JSON.stringify(payload))
-            statusMessage.value = '设置已保存到本地'
-        }
-    } catch (err: any) {
-        statusMessage.value = `保存失败: ${err?.message || err}`
-    }
+    useAppSettings().updateSettings({
+        overwriteExistingFiles: setting.overwriteExistingFiles,
+        defaultServerPort: setting.defaultServerPort,
+        defaultDownloadPath: setting.defaultDownloadPath,
+        NotificationType: setting.NotificationType,
+        exitOrMinimizeToTray: setting.exitOrMinimizeToTray
+    })
+    useAppSettings().saveSettings();
 }
 
 const resetDefaults = () => {
-    setting.overwriteExistingFiles = defaultSettings.overwriteExistingFiles;
-    setting.defaultServerPort = defaultSettings.defaultServerPort;
-    setting.defaultDownloadPath = defaultSettings.defaultDownloadPath;
-    setting.enableNotifications = defaultSettings.enableNotifications;
-    statusMessage.value = '已恢复默认值'
+    useAppSettings().resetSettings();
 }
 
 onMounted(() => {
