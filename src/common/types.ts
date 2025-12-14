@@ -75,6 +75,7 @@ export interface AppSettings {
     defaultDownloadPath: string;
     NotificationType: 'system' | 'custom' | 'none';
     exitOrMinimizeToTray: boolean;
+    language: 'zh' | 'en';
 }
 
 export interface SystemNotificationOptions {

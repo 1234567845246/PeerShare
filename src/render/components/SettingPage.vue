@@ -31,6 +31,13 @@
                 <label for="tray">窗口关闭时最小化到系统托盘</label>
             </div>
             <div class="form-row">
+                <label class="form-label">语言</label>
+                <Select v-model="setting.language" placeholder="选择语言" >
+                    <Option value="zh" label="简体中文" description="中文简体" default />
+                    <Option value="en" label="English" description="English"  />
+                </Select>
+            </div>
+            <div class="form-row">
                 <label class="form-label">通知类型</label>
                 <Select v-model="setting.NotificationType" placeholder="选择通知类型" >
                     <Option value="system" label="系统通知" description="使用系统默认的通知方式" />
@@ -65,6 +72,7 @@ const loadSettings = async () => {
     setting.overwriteExistingFiles = useAppSettings().settings.overwriteExistingFiles
     setting.NotificationType = useAppSettings().settings.NotificationType
     setting.exitOrMinimizeToTray = useAppSettings().settings.exitOrMinimizeToTray
+    setting.language = useAppSettings().settings.language
 }
 
 // 选择目录（通过主进程）
@@ -91,7 +99,8 @@ const saveSettings = async () => {
         defaultServerPort: setting.defaultServerPort,
         defaultDownloadPath: setting.defaultDownloadPath,
         NotificationType: setting.NotificationType,
-        exitOrMinimizeToTray: setting.exitOrMinimizeToTray
+        exitOrMinimizeToTray: setting.exitOrMinimizeToTray,
+        language: setting.language
     })
     useAppSettings().saveSettings();
 }

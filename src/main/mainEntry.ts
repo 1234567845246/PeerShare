@@ -373,6 +373,9 @@ class Application {
         
         this.mainWindow.on('closed', () => {
             this.mainWindow = null;
+            this.fileServer?.close();
+            this.fileClient?.disconnect();
+            this.systemTray?.destroy();
         })
         Menu.setApplicationMenu(null);
         this.systemTray = new SystemTray(this.mainWindow);

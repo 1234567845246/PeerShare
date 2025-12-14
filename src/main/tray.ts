@@ -17,7 +17,7 @@ class SystemTray{
             }
         })
     }
-    public destory(){
+    public destroy(){
         if(!this.tray.isDestroyed()){
             this.tray.destroy();
         }

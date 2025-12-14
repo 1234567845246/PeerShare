@@ -488,6 +488,7 @@ export class FileTransferServer extends EventEmitter {
     public close() {
         this.clients.forEach(client => {
             client.close();
+            this.sendCancelToClient(this.clientIds.get(client) || '', '*'); // Send cancel to all clients
         });
         this.wss.close();
     }

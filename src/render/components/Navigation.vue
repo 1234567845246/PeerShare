@@ -4,19 +4,19 @@
     <div class="nav-controls">
       <div class="nav-buttons">
         <button class="nav-btn" :class="{ active: route.path === '/' }" @click="goToHome">
-          主页
+          {{ $t('nav.navBtn1') }}
         </button>
         <button class="nav-btn" :class="{ active: route.path === '/send' }" @click="goToSend">
-          发送文件
+          {{ $t('nav.navBtn2') }}
         </button>
         <button class="nav-btn" :class="{ active: route.path === '/receive' }" @click="goToReceive">
-          接收文件
+          {{ $t('nav.navBtn3') }}
         </button>
         <button class="nav-btn" :class="{ active: route.path === '/setting' }" @click="goToSetting">
-          设置
+          {{ $t('nav.navBtn4') }}
         </button>
       </div>
-      <button class="theme-toggle" id="theme-toggle" title="切换主题" @click="toggleTheme">
+      <button class="theme-toggle" id="theme-toggle" :title="$t('nav.themeToggle')" @click="toggleTheme">
         <i class="fas fa-moon"></i>
       </button>
     </div>

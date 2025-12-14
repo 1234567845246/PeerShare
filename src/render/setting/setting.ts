@@ -20,6 +20,7 @@ export function useAppSettings() {
             overwriteExistingFiles: unref(appSettings).overwriteExistingFiles,
             defaultDownloadPath: unref(appSettings).defaultDownloadPath,
             NotificationType: unref(appSettings).NotificationType,
+            language: unref(appSettings).language,
             exitOrMinimizeToTray: unref(appSettings).exitOrMinimizeToTray
         }
         const result = await window.electronAPI.saveSettings(setting);

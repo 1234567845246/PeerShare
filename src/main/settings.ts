@@ -15,6 +15,7 @@ class Settings {
         defaultServerPort: 8080,
         defaultDownloadPath: app.getPath('downloads'),
         NotificationType: 'none',
+        language: 'zh',
         exitOrMinimizeToTray: false,
     };
 

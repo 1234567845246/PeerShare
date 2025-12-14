@@ -570,7 +570,7 @@ const handleKeydown = (e: KeyboardEvent) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: 12px;
   line-height: 1;
 }
 
