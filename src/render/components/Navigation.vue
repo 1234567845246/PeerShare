@@ -1,6 +1,6 @@
 <template>
   <div class="app-header">
-    <div class="app-title">文件传输器</div>
+    <div class="app-title">{{ $t('title') }}</div>
     <div class="nav-controls">
       <div class="nav-buttons">
         <button class="nav-btn" :class="{ active: route.path === '/' }" @click="goToHome">

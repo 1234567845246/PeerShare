@@ -1,4 +1,3 @@
-<!-- components/BottomDropdownDescriptionSelect/Select.vue -->
 <template>
   <div 
     class="custom-select" 
@@ -101,8 +100,8 @@
           <!-- 默认槽位 -->
           <template v-if="hasSlotOptions">
             <div 
-              v-for="option in filteredSlotOptions"
-              :key="option.value"
+              v-for="(option, index) in filteredSlotOptions"
+              :key="`${option.value}-${index}`"
               class="option-item-wrapper"
             >
               <Option
@@ -118,8 +117,8 @@
           <!-- 通过 options prop -->
           <template v-else>
             <div 
-              v-for="option in filteredOptions"
-              :key="option.value"
+              v-for="(option, index) in filteredOptions"
+              :key="`${option.value}-${index}`"
               class="option-item-wrapper"
             >
               <Option
@@ -163,7 +162,7 @@
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
             </svg>
             <div class="description-title">
-              {{ hasError ? '错误' : '描述' }}
+              {{ hasError ? $t('select.error') : $t('select.description') }}
             </div>
           </div>
           <div class="description-text">
@@ -174,6 +173,10 @@
     </teleport>
   </div>
 </template>
+<script lang="ts">
+import { i18n } from '../i18n/i18n';
+let query = i18n.global.t('select.placeholder');
+</script>
 
 <script setup lang="ts">
 import { 
@@ -188,10 +191,12 @@ import {
 } from 'vue';
 import Option from './Option.vue';
 import type { SelectOption, SelectProps, SelectEmits } from '../../common/types';
+import {useI18n} from 'vue-i18n';
+const { t } = useI18n();
 
 const props = withDefaults(defineProps<SelectProps>(), {
   options: () => [],
-  placeholder: '请选择',
+  placeholder: query,
   disabled: false,
   clearable: false,
   filterable: false,
@@ -258,6 +263,11 @@ const selectContext = {
   clearError: () => {
     hasError.value = false;
     errorMessage.value = '';
+  },
+  
+  // 更新选项属性
+  updateOptionProperty: (value: string | number, property: keyof SelectOption, newValue: string|number) => {
+    updateOptionProperty(value, property, newValue as string | number);
   }
 };
 
@@ -332,31 +342,35 @@ const optionsMaxHeight = computed(() => {
 
 const filterPlaceholder = computed(() => `搜索${props.filterable ? '选项或描述' : '选项'}...`);
 const showEmptyState = computed(() => {
+  console.log('showEmptyState', filteredOptions.value.length,filteredSlotOptions.value);
   if (hasSlotOptions.value) {
     return filteredSlotOptions.value.length === 0;
   }
   return filteredOptions.value.length === 0;
 });
 const emptyText = computed(() => 
-  filterText.value ? '未找到匹配项' : '暂无选项'
+  filterText.value ? t('select.notFound') : t('select.noData')
 );
 
 // 处理插槽选项
 const slots = useSlots();
 const slotOptions = ref<SelectOption[]>([]);
+// 创建响应式的选项列表，用于跟踪动态变化
+const reactiveSlotOptions = ref<SelectOption[]>([]);
+
 const filteredSlotOptions = computed(() => {
   if (!props.filterable || !filterText.value.trim()) {
-    return slotOptions.value;
+    return reactiveSlotOptions.value;
   }
   
   const searchText = filterText.value.toLowerCase();
-  return slotOptions.value.filter(option => 
+  return reactiveSlotOptions.value.filter(option => 
     option.label.toLowerCase().includes(searchText) ||
     (option.description && option.description.toLowerCase().includes(searchText))
   );
 });
 const hasSlotOptions = computed(() => {
-  return slots.default && slotOptions.value.length > 0;
+  return slots.default && (slotOptions.value.length > 0 || reactiveSlotOptions.value.length > 0);
 });
 
 // 初始化插槽选项
@@ -364,25 +378,100 @@ const extractOptionsFromSlots = () => {
   const defaultSlot = slots.default?.();
   if (!defaultSlot) {
     slotOptions.value = [];
+    reactiveSlotOptions.value = [];
     return;
   }
   
   const options: SelectOption[] = [];
   
-  defaultSlot.forEach(vnode => {
-    if (vnode.type === Option) {
-      const props = vnode.props || {};
-      options.push({
-        value: props.value,
-        label: props.label,
-        description: props.description,
-        disabled: props.disabled,
-        default:props.default
-      });
-    }
-  });
+  const processVNodes = (vnodes: any[]) => {
+    vnodes.forEach(vnode => {
+      // 处理 v-for 生成的节点
+      if (vnode.children && Array.isArray(vnode.children)) {
+        processVNodes(vnode.children);
+      }
+      // 处理单个 Option 组件
+      else if (vnode.type === Option) {
+        const props = vnode.props || {};
+        // 确保 value 和 label 存在且不为 undefined
+        if (props.value !== undefined && props.label !== undefined) {
+          options.push({
+            value: props.value,
+            label: props.label,
+            description: props.description,
+            disabled: props.disabled,
+            default: props.default
+          });
+        }
+      }
+    });
+  };
+  
+  processVNodes(defaultSlot);
   
   slotOptions.value = options;
+  // 更新响应式选项列表
+  reactiveSlotOptions.value = [...options];
+};
+// 监听插槽选项的更新
+const updateSlotOptions = () => {
+  const defaultSlot = slots.default?.();
+  if (!defaultSlot) return;
+  
+  const processVNodes = (vnodes: any[]) => {
+    vnodes.forEach(vnode => {
+      // 处理 v-for 生成的节点
+      if (vnode.children && Array.isArray(vnode.children)) {
+        processVNodes(vnode.children);
+      }
+      // 处理单个 Option 组件
+      else if (vnode.type === Option) {
+        const props = vnode.props || {};
+        // 确保 value 存在且不为 undefined
+        if (props.value === undefined) return;
+        
+        const index = reactiveSlotOptions.value.findIndex(opt => opt.value === props.value);
+        if (index !== -1) {
+          // 更新现有选项的属性
+          if (props.label !== undefined) {
+            reactiveSlotOptions.value[index].label = props.label;
+          }
+          if (props.description !== undefined) {
+            reactiveSlotOptions.value[index].description = props.description;
+          }
+          if (props.disabled !== undefined) {
+            reactiveSlotOptions.value[index].disabled = props.disabled;
+          }
+          if (props.default !== undefined) {
+            reactiveSlotOptions.value[index].default = props.default;
+          }
+        } else if (props.label !== undefined) {
+          // 如果选项不存在但有必要的属性，则添加新选项
+          reactiveSlotOptions.value.push({
+            value: props.value,
+            label: props.label,
+            description: props.description,
+            disabled: props.disabled,
+            default: props.default
+          });
+        }
+      }
+    });
+  };
+  
+  processVNodes(defaultSlot);
+};
+// 更新特定选项的属性
+const updateOptionProperty = (value: string | number, property: keyof SelectOption, newValue: string | number) => {
+  // 更新插槽选项
+  const slotIndex = reactiveSlotOptions.value.findIndex(opt => opt.value === value);
+  if (slotIndex !== -1) {
+    reactiveSlotOptions.value[slotIndex] = {
+      ...reactiveSlotOptions.value[slotIndex],
+      [property]: newValue
+    };
+    console.log(reactiveSlotOptions.value);
+  }
 };
 
 // 方法
@@ -474,7 +563,16 @@ onMounted(() => {
   
   // 监听插槽变化
   watch(() => slots.default, () => {
-    extractOptionsFromSlots();
+    updateSlotOptions();
+  }, { deep: true });
+  
+  // 监听props.options变化
+  watch(() => props.options, (newOptions) => {
+    // 当props.options变化时，更新内部状态
+    if (!hasSlotOptions.value) {
+      // 如果不是使用插槽选项，则更新过滤后的选项
+      // 触发重新计算filteredOptions
+    }
   }, { deep: true });
 });
 
@@ -516,6 +614,7 @@ const handleKeydown = (e: KeyboardEvent) => {
   }
 };
 </script>
+
 
 <style scoped>
 .custom-select {
@@ -571,7 +670,7 @@ const handleKeydown = (e: KeyboardEvent) => {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
-  line-height: 1;
+  line-height: 2;
 }
 
 .placeholder {

@@ -44,6 +44,7 @@ export interface ElectronAPI {
   setTheme: (theme: 'dark' | 'light') => void;
 
   openDevTools: () => void;
+  openFileExplorer: (path: string) => void;
   // 可选的设置相关接口（主进程可实现）
   getSettings: () => Promise<AppSettings>;
   saveSettings: (settings: AppSettings) => Promise<{ success: boolean; message: string }>;
@@ -94,6 +95,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
    getPathForFile: (file: File) => webUtils.getPathForFile(file).replace(/\\/g, "/"),
 
    setTheme: (theme: 'dark' | 'light') => ipcRenderer.send('set-theme', theme),
+   openFileExplorer: (path: string) => ipcRenderer.send('open-file-explorer', path),
+   
    openDevTools: () => ipcRenderer.send('open-dev-tools'),
   // 可选的设置相关 ipc 调用（没有主进程处理也安全）
   getSettings: () => ipcRenderer.invoke('get-settings'),

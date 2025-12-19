@@ -4,22 +4,22 @@
     <div class="send-page">
       <h2 class="section-title">
         <i class="fas fa-paper-plane"></i>
-        发送文件
+        {{ $t('send.title') }}
       </h2>
 
 
       <!-- 客户端控制 -->
       <div class="control-section">
-        <h3>连接接收方</h3>
+        <h3>{{ $t('send.connectReceiver') }}</h3>
         <div class="control-group">
           <label for="clientUrl">地址:</label>
           <input type="text" id="clientUrl" v-model="clientUrl" :disabled="isClientConnected"
-            placeholder="例如: ws://192.168.1.100:8080" />
+            :placeholder="$t('send.urlplaceholder')" />
           <button @click="connectClient" :disabled="isClientConnected">
-            {{ isClientConnected ? '已连接' : '连接' }}
+            {{ isClientConnected ? $t('send.connected') : $t('send.connect') }}
           </button>
           <button @click="disconnectClient" :disabled="!isClientConnected">
-            断开连接
+            {{ $t('send.disconnect') }}
           </button>
         </div>
       </div>
@@ -30,8 +30,8 @@
           <div class="file-icon">
             <i class="fas fa-cloud-upload-alt"></i>
           </div>
-          <p class="file-selector-text">点击选择文件或拖放文件到此处</p>
-          <button class="browse-btn">浏览文件</button>
+          <p class="file-selector-text">{{ $t('send.clickOrDrop') }}</p>
+          <button class="browse-btn">{{ $t('send.browse') }}</button>
           <input type="file" ref="fileInput" @change="handleFileSelect" style="display: none;">
         </div>
 
@@ -41,12 +41,18 @@
               <i class="fas fa-file"></i>
             </div>
             <div class="file-details">
-              <div class="file-name">{{ selectedFile.name }}</div>
-              <div class="file-size-rate">
-                <div class="file-size">{{ formatFileSize(selectedFile.size) }}</div>
+              <div class="file-name">
+                {{ selectedFile.name }}
+                <button class="muted-btn" @click="openFileExplorer">
+                  <i class="fas fa-folder-open"></i>
+                </button>
               </div>
             </div>
+            <div class="file-size-rate">
+              <div class="file-size">{{ formatFileSize(selectedFile.size) }}</div>
+            </div>
           </div>
+
 
           <div class="progress-section">
             <div class="progress-bar">
@@ -61,17 +67,16 @@
           <div class="action-buttons-row">
             <button class="btn primary" @click="sendFile" v-show="isSending || !isCompleted">
               <i class="fas fa-paper-plane"></i>
-              发送文件  
+              {{ $t('send.title') }}
             </button>
-            <button class="btn secondary" @click="pauseResumeFile" 
-              v-show="isPaused || isSending">
+            <button class="btn secondary" @click="pauseResumeFile" v-show="isPaused || isSending">
               <i class="fas fa-pause" v-if="!isPaused"></i>
               <i class="fas fa-play" v-if="isPaused"></i>
-              {{ isPaused ? '恢复' : '暂停' }}
+              {{ isPaused ? $t('send.resume') : $t('send.pause') }}
             </button>
-            <button class="btn secondary" @click="cancelSend" v-show="isCancel || isSending" >
+            <button class="btn secondary" @click="cancelSend" v-show="isCancel || isSending">
               <i class="fas fa-times"></i>
-              取消
+              {{ $t('send.cancel') }}
             </button>
           </div>
         </div>
@@ -85,6 +90,8 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { formatFileSize, formatRate } from '../../common/tools'
 import type { ClientTransferStatus } from '../../common/types'
 import { useAppSettings } from '../setting/setting'
+import { useI18n } from 'vue-i18n'
+const { t } = useI18n()
 
 // 组件引用
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -97,7 +104,7 @@ const isPaused = ref(false)
 const isCompleted = ref(false)
 const isCancel = ref(false)
 const progress = ref(0)
-const progressMessage = ref('准备发送')
+const progressMessage = ref(t('send.readyToSend'))
 const isClientConnected = ref(false)
 const clientUrl = ref(`ws://localhost:${useAppSettings().settings.defaultServerPort}`);
 let filePath = '' // 存储文件路径
@@ -119,7 +126,7 @@ const handleFileSelect = (event: Event) => {
       isFileSelected.value = true
       isCompleted.value = false
       progress.value = 0
-      progressMessage.value = '准备发送'
+      progressMessage.value = t('send.readyToSend')
     }
   }
 }
@@ -133,7 +140,7 @@ const handleFileDrop = (event: DragEvent) => {
     isFileSelected.value = true
     isCompleted.value = false
     progress.value = 0
-    progressMessage.value = '准备发送'
+    progressMessage.value = t('send.readyToSend')
   }
 }
 
@@ -147,13 +154,13 @@ const connectClient = async () => {
     const result = await window.electronAPI.connectFileClient(clientUrl.value)
     if (result.success) {
       isClientConnected.value = true
-      progressMessage.value = `已连接到 ${clientUrl.value}`
+      progressMessage.value = t('send.connectionSuccess', { url: clientUrl.value })
     } else {
-      progressMessage.value = `连接失败: ${result.message}`
+      progressMessage.value = t('send.connectionFailed', { message: result.message })
     }
     console.log('Connect client result:', result);
   } catch (error: any) {
-    progressMessage.value = `连接错误: ${error.message || '未知错误'}`
+    progressMessage.value = t('send.connectionError', { message: error.message || t('send.unknownError') })
   }
 }
 
@@ -163,24 +170,24 @@ const disconnectClient = async () => {
     const result = await window.electronAPI.disconnectFileClient()
     if (result.success) {
       isClientConnected.value = false
-      progressMessage.value = '已断开连接'
+      progressMessage.value = t('send.disconnectionSuccess')
     } else {
-      progressMessage.value = `断开连接失败: ${result.message}`
+      progressMessage.value = t('send.disconnectionFailed', { message: result.message })
     }
   } catch (error: any) {
-    progressMessage.value = `断开连接错误: ${error.message || '未知错误'}`
+    progressMessage.value = t('send.disconnectionError', { message: error.message || t('send.unknownError') })
   }
 }
 
 // 发送文件
 const sendFile = async () => {
   if (!selectedFile.value) {
-    progressMessage.value = '请先选择文件'
+    progressMessage.value = t('send.noFileSelected')
     return
   }
 
   if (!isClientConnected.value) {
-    progressMessage.value = '请先连接到接收方'
+    progressMessage.value = t('send.noClientConnected')
     return
   }
 
@@ -189,7 +196,7 @@ const sendFile = async () => {
   isCompleted.value = false
   isCancel.value = false
   progress.value = 0
-  progressMessage.value = '准备发送文件...'
+  progressMessage.value = t('send.sendingFile')
 
   try {
     // 获取文件路径
@@ -200,16 +207,22 @@ const sendFile = async () => {
 
   } catch (error: any) {
     console.error('发送文件失败:', error)
-    progressMessage.value = `发送文件错误: ${error.message || '未知错误'}`
+    progressMessage.value = t('send.sendError', { message: error.message || t('send.unknownError') })
   } finally {
     isSending.value = false
+  }
+}
+
+const openFileExplorer = () => {
+  if (selectedFile.value) {
+    window.electronAPI.openFileExplorer(window.electronAPI.getPathForFile(selectedFile.value));
   }
 }
 
 // 暂停/恢复文件传输
 const pauseResumeFile = async () => {
   if (!selectedFile.value) {
-    progressMessage.value = '请先选择文件'
+    progressMessage.value = t('send.noFileSelected')
     return
   }
 
@@ -219,21 +232,21 @@ const pauseResumeFile = async () => {
 
       const result = await window.electronAPI.resumeFileTransfer(selectedFile.value.name);
       if (!result.success) {
-        progressMessage.value = `恢复失败: ${result.message}`
+        progressMessage.value = t('send.resumeFailed', { message: result.message })
       }
 
     } catch (error: any) {
-      progressMessage.value = `恢复错误: ${error.message || '未知错误'}`
+      progressMessage.value = t('send.resumeError', { message: error.message || t('send.unknownError') })
     }
   } else {
     // 暂停传输
     try {
       const result = await window.electronAPI.pauseFileTransfer(selectedFile.value.name);
       if (!result.success) {
-        progressMessage.value = `暂停失败: ${result.message}`
+        progressMessage.value = t('send.pauseFailed', { message: result.message })
       }
     } catch (error: any) {
-      progressMessage.value = `暂停错误: ${error.message || '未知错误'}`
+      progressMessage.value = t('send.pauseError', { message: error.message || t('send.unknownError') })
     }
   }
 }
@@ -244,10 +257,10 @@ const cancelSend = async () => {
     if (!selectedFile.value) return
     const result = await window.electronAPI.cancelFileTransfer(selectedFile.value.name)
     if (!result.success) {
-      progressMessage.value = `取消失败: ${result.message}`
+      progressMessage.value = t('send.cancelFailed', { message: result.message })
     }
   } catch (error: any) {
-    progressMessage.value = `取消错误: ${error.message || '未知错误'}`
+    progressMessage.value = t('send.cancelError', { message: error.message || t('send.unknownError') })
   }
 }
 
@@ -259,26 +272,33 @@ const handleFileTransferStatus = (data: ClientTransferStatus) => {
     // 更新传输速率
     if ('transferRate' in data && data.transferRate) {
       // 在消息中显示传输速率
-      progressMessage.value = `传输进度: ${data.progress}% (${formatRate(data.transferRate)})`;
+      progressMessage.value = t('send.transferProgress', { progress: data.progress, rate: formatRate(data.transferRate) });
     }
   }
 
   if (data.type === 'transfer-pause') {
     isPaused.value = true;
     isSending.value = false;
-    progressMessage.value = data.message || '传输已暂停';
+    progressMessage.value = data.message || t('send.transferPaused');
   }
 
   if (data.type === 'transfer-resume') {
     isPaused.value = false;
     isSending.value = true;
-    progressMessage.value = data.message || '传输已恢复';
+    progressMessage.value = data.message || t('send.transferResumed');
   }
 
+  if (data.type === 'transfer-close') {
+    isSending.value = false;
+    isPaused.value = false;
+    isCancel.value = false;
+    isClientConnected.value = false;
+    progressMessage.value = data.message || t('send.transferClosed');
+  }
   if (data.type === 'transfer-cancel') {
     isSending.value = false;
     isCancel.value = true;
-    progressMessage.value = data.message || '传输已取消';
+    progressMessage.value = data.message || t('send.transferCancelled');
   }
 
   if (data.message) {
@@ -294,7 +314,7 @@ const handleFileTransferStatus = (data: ClientTransferStatus) => {
 
 // 处理文件传输错误
 const handleFileTransferError = (error: { message: string }) => {
-  progressMessage.value = `传输错误: ${error.message}`
+  progressMessage.value = t('send.transferError', { message: error.message || t('send.unknownError') })
   isSending.value = false
 }
 
@@ -519,6 +539,17 @@ onUnmounted(() => {
   gap: 10px;
   margin-top: 20px;
 }
+
+.muted-btn {
+  border: none;
+  outline: none;
+  background-color: var(--bg-card);
+}
+
+.muted-btn:not(:disabled):hover {
+  background-color: var(--text-muted);
+}
+
 
 .btn {
   padding: 10px 20px;

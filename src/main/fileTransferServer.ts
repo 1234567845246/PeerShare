@@ -3,7 +3,7 @@ import { createReadStream, statSync, createWriteStream, WriteStream, ReadStream,
 import { join, basename, parse } from 'path';
 import { type ClientTransferStatus, type ServerTransferStatus } from '../common/types';
 import EventEmitter from 'events';
-import { MessageCodec, MessageType, type FileStartMessage, type FileStartAckMessage, type FileChunkMessage, type FileChunkAckMessage, type FileEndMessage, type FilePauseMessage, type FilePauseAckMessage, type FileResumeMessage, type FileResumeAckMessage, type FileCancelMessage, type FileCancelAckMessage, type FileControlMessage, type FileMessage } from '../common/MessageCodec';
+import { MessageCodec, MessageType, type FileStartMessage, type FileStartAckMessage, type FileChunkMessage, type FileChunkAckMessage, type FileEndMessage, type FilePauseMessage, type FilePauseAckMessage, type FileResumeMessage, type FileResumeAckMessage, type FileCancelMessage, type FileCancelAckMessage, type FileControlMessage, type FileCloseMessage, type FileMessage } from '../common/MessageCodec';
 import { randomUUID } from 'crypto';
 import { settings } from './settings';
 
@@ -67,20 +67,29 @@ export class FileTransferServer extends EventEmitter {
             ws.on('close', () => {
                 console.log('Client disconnected');
                 // 清理资源
+                const fileInfo = this.fileInfos.get(ws);
+                if (fileInfo) {
+                    this.onProgressCallbacks({
+                        type: 'transfer-close',
+                        clientId: this.clientIds.get(ws) || 'unknown',
+                        filename: fileInfo.filename,
+                        message: '已断开连接',
+                    })
+                }
                 this.cleanupClientResources(ws);
             });
 
             ws.on('error', (error) => {
                 console.error('WebSocket error:', error);
-                // 清理资源
+                // 发送错误信息给客户端
                 this.onProgressCallbacks({
                     type: 'transfer-error',
                     message: `连接错误: ${error.message || '未知错误'}`,
                     clientId: this.clientIds.get(ws) || 'unknown',
                     filename: ''
                 });
+                // 清理资源
                 this.cleanupClientResources(ws);
-
             });
         });
 
@@ -94,10 +103,17 @@ export class FileTransferServer extends EventEmitter {
     }
 
     private cleanupClientResources(ws: WebSocket) {
+        console.log('Cleaning up resources for client');
+
         // 关闭并清理该客户端的文件流
         const writeStream = this.fileStreams.get(ws);
         if (writeStream) {
-            writeStream.end();
+            try {
+                writeStream.end();
+                console.log('File stream closed successfully');
+            } catch (err) {
+                console.error('Error closing file stream:', err);
+            }
             this.fileStreams.delete(ws);
         }
 
@@ -110,6 +126,8 @@ export class FileTransferServer extends EventEmitter {
 
         // 移除进度回调函数
         this.onProgressCallbacks = () => { };
+
+        console.log('Client resources cleaned up');
     }
 
     private handleMessage(ws: WebSocket, data: WebSocket.Data) {
@@ -160,7 +178,7 @@ export class FileTransferServer extends EventEmitter {
 
         // 创建文件写入流
         let filePath = join(settings.settingData.defaultDownloadPath || __dirname, message.filename);
-        if(!settings.settingData.overwriteExistingFiles){
+        if (!settings.settingData.overwriteExistingFiles) {
             let uniqueFilePath = filePath;
             let count = 1;
             while (existsSync(uniqueFilePath)) {
@@ -214,10 +232,29 @@ export class FileTransferServer extends EventEmitter {
             console.log(`File transfer is paused for ${fileInfo.filename}, writing arrived chunk ${message.chunkIndex} and will ACK`);
         }
 
+        // 检查 WebSocket 连接状态
+        if (ws.readyState !== WebSocket.OPEN) {
+            console.log('WebSocket connection is not open, skipping chunk processing');
+            return;
+        }
+
         // 写入文件块数据
         writeStream.write(message.chunkData, (err: any) => {
+            // 检查 WebSocket 连接状态
+            if (ws.readyState !== WebSocket.OPEN) {
+                console.log('WebSocket connection is not open, skipping ACK');
+                return;
+            }
+
             if (err) {
                 console.error('Failed to write file chunk:', err);
+                // 发送错误信息给客户端
+                this.onProgressCallbacks({
+                    type: 'transfer-error',
+                    message: `写入文件块失败: ${err.message || '未知错误'}`,
+                    clientId: this.clientIds.get(ws) || 'unknown',
+                    filename: fileInfo.filename
+                });
             } else {
                 console.log(`Written chunk ${message.chunkIndex} (${message.chunkData.length} bytes) to file`);
 
@@ -277,6 +314,19 @@ export class FileTransferServer extends EventEmitter {
             });
             this.fileStreams.delete(ws);
         }
+    }
+    private handleFileClose(ws: WebSocket, _: FileCloseMessage) {
+        const fileInfo = this.fileInfos.get(ws);
+        if (fileInfo) {
+            this.onProgressCallbacks({
+                type: 'transfer-close',
+                clientId: this.clientIds.get(ws) || 'unknown',
+                filename: fileInfo.filename,
+                message: '已断开连接',
+            })
+        }
+
+        this.cleanupClientResources(ws);
     }
 
     // 处理文件暂停消息
@@ -486,11 +536,33 @@ export class FileTransferServer extends EventEmitter {
     }
 
     public close() {
+        console.log('Closing file transfer server');
+
+        // 通知所有客户端服务器即将关闭
         this.clients.forEach(client => {
-            client.close();
-            this.sendCancelToClient(this.clientIds.get(client) || '', '*'); // Send cancel to all clients
+            if (client.readyState === WebSocket.OPEN) {
+                try {
+                    client.close();
+                } catch (e) {
+                    console.error('Error closing client connection:', e);
+                }
+            }
         });
-        this.wss.close();
+
+        // 清理所有资源
+        this.clients.forEach(client => {
+            this.cleanupClientResources(client);
+        });
+
+        // 关闭WebSocket服务器
+        try {
+            this.wss.close();
+            console.log('WebSocket server closed');
+        } catch (e) {
+            console.error('Error closing WebSocket server:', e);
+        }
+
+        console.log('File transfer server closed');
     }
 }
 
@@ -542,20 +614,53 @@ export class FileTransferClient {
 
             this.ws.on('error', (error) => {
                 console.error('File transfer client error:', error);
+                // 发送错误信息
+                if (this.onProgressCallbacks) {
+                    this.onProgressCallbacks({
+                        type: 'transfer-error',
+                        message: `连接错误: ${error.message || '未知错误'}`
+                    });
+                }
+                // 清理资源
+                this.disconnect();
                 reject(error);
-
             });
 
             this.ws.on('close', () => {
                 console.log('Disconnected from file transfer server');
-                // 清理所有定时器
-                this.ackTimeouts.forEach(timeout => clearTimeout(timeout));
-                this.ackTimeouts.clear();
+                // 发送断开连接信息
+                if (this.onProgressCallbacks) {
+                    this.onProgressCallbacks({
+                        type: 'transfer-close',
+                        message: '与文件传输服务器的连接已断开'
+                    });
+                }
+                // 清理资源
+                this.clearTimeouts();
+                // 如果正在发送文件，需要清理相关资源
+                if (this.sendingInProgress) {
+                    this.sendingInProgress = false;
+                    this.activeFilePath = null;
+                    if (this.fileStream) {
+                        try {
+                            this.fileStream.destroy();
+                        } catch (e) {
+                            // ignore
+                        }
+                        this.fileStream = null;
+                    }
+                }
             });
         });
     }
 
     private handleMessage(data: WebSocket.Data) {
+        // 检查WebSocket连接状态
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            console.log('WebSocket is not open, ignoring incoming message');
+            return;
+        }
+
         if (!Buffer.isBuffer(data)) {
             console.error('Received non-buffer data');
             return;
@@ -622,6 +727,11 @@ export class FileTransferClient {
                     // 异步恢复发送，不阻塞消息处理
                     this.sendFileFromOffset(this.activeFilePath, this.lastChunkIndex + 1).catch(err => {
                         console.error('Error while resuming transfer:', err);
+                        // 发送错误信息
+                        this.onProgressCallbacks({
+                            type: 'transfer-error',
+                            message: `恢复传输失败: ${err.message || '未知错误'}`
+                        });
                     });
                 }
 
@@ -691,6 +801,61 @@ export class FileTransferClient {
         return this.sendFileFromOffset(filePath, 0);
     }
 
+    // 辅助函数：检查WebSocket连接状态并清理资源
+    private checkWebSocketConnection(fileStream: ReadStream, onWsClose: () => void, onStreamError: (err: any) => void, onStreamClose: () => void): boolean {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            console.log('WebSocket connection lost during file transfer');
+            // 清理资源
+            try { fileStream.destroy(); } catch (e) { }
+            this.clearTimeouts();
+            this.sendingInProgress = false;
+            this.activeFilePath = null;
+
+            // 移除事件监听器
+            if (this.ws) {
+                this.ws.removeListener('close', onWsClose);
+            }
+            try {
+                fileStream.off('error', onStreamError);
+                fileStream.off('close', onStreamClose);
+            } catch (e) { }
+
+            return false; // 连接已断开
+        }
+        return true; // 连接正常
+    }
+
+    // 辅助函数：处理传输取消或暂停
+    private handleTransferCancellation(fileStream: ReadStream, onWsClose: () => void, onStreamError: (err: any) => void, onStreamClose: () => void): boolean {
+        if (this.isCancelled) {
+            console.log('File transfer cancelled');
+            // 清理发送状态
+            this.sendingInProgress = false;
+            this.activeFilePath = null;
+            this.clearTimeouts();
+            // 确保流已关闭
+            try { fileStream.destroy(); } catch (e) { }
+
+            // 移除事件监听器
+            if (this.ws) {
+                this.ws.removeListener('close', onWsClose);
+            }
+            try {
+                fileStream.off('error', onStreamError);
+                fileStream.off('close', onStreamClose);
+            } catch (e) { }
+
+            return true; // 传输已取消
+        }
+
+        if (this.isPaused) {
+            console.log('File transfer paused');
+            return true; // 传输已暂停
+        }
+
+        return false; // 传输未被取消或暂停
+    }
+
     public async sendFileFromOffset(filePath: string, startChunkIndex: number): Promise<void> {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             throw new Error('WebSocket is not connected');
@@ -723,6 +888,12 @@ export class FileTransferClient {
                 filename: filename,
                 fileSize: fileSize
             };
+
+            // 检查WebSocket连接状态
+            if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                throw new Error('WebSocket connection lost before sending file start');
+            }
+
             this.ws.send(this.encodeMessage(fileStartMsg));
 
             // 2. 等待文件开始确认
@@ -730,11 +901,43 @@ export class FileTransferClient {
             await new Promise<void>((resolve, reject) => {
                 this.fileStartAckResolver = resolve;
                 // 设置30秒超时
-                setTimeout(() => {
+                const timeout = setTimeout(() => {
                     if (!this.receivedFileStartAck) {
                         reject(new Error('Timeout waiting for FILE_START_ACK'));
+                        // 发送错误信息
+                        if (this.onProgressCallbacks) {
+                            this.onProgressCallbacks({
+                                type: 'transfer-error',
+                                message: '等待文件开始确认超时'
+                            });
+                        }
                     }
                 }, this.START_ACK_TIMEOUT);
+
+                // 添加清理函数
+                const cleanup = () => {
+                    clearTimeout(timeout);
+                };
+
+                // 如果连接断开，清理并拒绝Promise
+                const onClose = () => {
+                    cleanup();
+                    reject(new Error('Connection closed while waiting for FILE_START_ACK'));
+                };
+
+                if (this.ws) {
+                    this.ws.once('close', onClose);
+                }
+
+                // 修改resolver以清理资源
+                const originalResolver = this.fileStartAckResolver;
+                this.fileStartAckResolver = () => {
+                    if (this.ws) {
+                        this.ws.removeListener('close', onClose);
+                    }
+                    cleanup();
+                    if (originalResolver) originalResolver();
+                };
             });
         }
 
@@ -753,6 +956,13 @@ export class FileTransferClient {
                 return;
             }
             console.error('Read stream error:', err);
+            // 发送错误信息
+            if (this.onProgressCallbacks) {
+                this.onProgressCallbacks({
+                    type: 'transfer-error',
+                    message: `文件读取错误: ${err.message || '未知错误'}`
+                });
+            }
         };
 
         const onStreamClose = () => {
@@ -761,37 +971,55 @@ export class FileTransferClient {
 
         fileStream.on('error', onStreamError);
         fileStream.on('close', onStreamClose);
+
+        // 监听WebSocket关闭事件
+        const onWsClose = () => {
+            console.log('WebSocket closed during file transfer');
+            // 清理资源
+            try {
+                fileStream.destroy();
+            } catch (e) {
+                // ignore
+            }
+            this.clearTimeouts();
+            this.sendingInProgress = false;
+            this.activeFilePath = null;
+        };
+
+        if (this.ws) {
+            this.ws.once('close', onWsClose);
+        }
+
         let chunkIndex = startChunkIndex;
         let bytesSent = startByteOffset;
 
         try {
             for await (const chunk of fileStream) {
-                // 检查是否暂停
+                // 检查WebSocket连接状态
+                if (!this.checkWebSocketConnection(fileStream, onWsClose, onStreamError, onStreamClose)) {
+                    throw new Error('WebSocket connection lost during file transfer');
+                }
+
+                // 检查是否暂停或取消
                 while (this.isPaused && !this.isCancelled) {
+                    // 检查WebSocket连接状态
+                    if (!this.checkWebSocketConnection(fileStream, onWsClose, onStreamError, onStreamClose)) {
+                        throw new Error('WebSocket connection lost during file transfer');
+                    }
                     await new Promise(resolve => setTimeout(resolve, 100));
                 }
 
                 // 检查是否取消
-                if (this.isCancelled) {
-                    console.log('File transfer cancelled');
-                    // 清理发送状态
-                    this.sendingInProgress = false;
-                    this.activeFilePath = null;
-                    // 清理所有待确认的块和超时定时器，防止进入无限等待
-                    this.pendingAcks.clear();
-                    this.ackTimeouts.forEach(timeout => clearTimeout(timeout));
-                    this.ackTimeouts.clear();
-                    // 确保流已关闭
-                    try { fileStream.destroy(); } catch (e) { }
-                    try {
-                        fileStream.off('error', onStreamError);
-                        fileStream.off('close', onStreamClose);
-                    } catch (e) { }
+                if (this.handleTransferCancellation(fileStream, onWsClose, onStreamError, onStreamClose)) {
                     return;
                 }
 
                 // 等待之前的块被确认（停等协议）
                 while (this.pendingAcks.size > 0) {
+                    // 检查WebSocket连接状态
+                    if (!this.checkWebSocketConnection(fileStream, onWsClose, onStreamError, onStreamClose)) {
+                        throw new Error('WebSocket connection lost during file transfer');
+                    }
                     await this.waitForAcks();
                 }
 
@@ -802,11 +1030,21 @@ export class FileTransferClient {
                     chunkData: chunk
                 };
 
+                // 检查WebSocket连接状态
+                if (!this.checkWebSocketConnection(fileStream, onWsClose, onStreamError, onStreamClose)) {
+                    throw new Error('WebSocket connection lost during file transfer');
+                }
+
                 this.ws.send(this.encodeMessage(fileChunkMsg));
                 this.pendingAcks.add(chunkIndex);
 
                 // 设置超时定时器
                 const timeout = setTimeout(() => {
+                    // 检查WebSocket连接状态
+                    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                        return;
+                    }
+
                     console.warn(`Timeout for chunk ${chunkIndex}, resending...`);
                     this.pendingAcks.delete(chunkIndex);
                     this.ws?.send(this.encodeMessage(fileChunkMsg));
@@ -847,9 +1085,12 @@ export class FileTransferClient {
                 console.log('File stream closed due to pause or cancel');
                 // 清理所有待确认的块和超时定时器
                 if (this.isCancelled) {
-                    this.pendingAcks.clear();
-                    this.ackTimeouts.forEach(timeout => clearTimeout(timeout));
-                    this.ackTimeouts.clear();
+                    this.clearTimeouts();
+                }
+
+                // 移除事件监听器
+                if (this.ws) {
+                    this.ws.removeListener('close', onWsClose);
                 }
                 try {
                     fileStream.off('error', onStreamError);
@@ -857,18 +1098,48 @@ export class FileTransferClient {
                 } catch (e) { }
                 return;
             }
+
+            // 处理其他错误
+            console.error('File transfer error:', err);
+            if (this.onProgressCallbacks) {
+                this.onProgressCallbacks({
+                    type: 'transfer-error',
+                    message: `文件传输错误: ${err.message || '未知错误'}`
+                });
+            }
+
+            // 清理资源
+            try { fileStream.destroy(); } catch (e) { }
+            this.clearTimeouts();
+            this.sendingInProgress = false;
+            this.activeFilePath = null;
+
+            // 移除事件监听器
+            if (this.ws) {
+                this.ws.removeListener('close', onWsClose);
+            }
+            try {
+                fileStream.off('error', onStreamError);
+                fileStream.off('close', onStreamClose);
+            } catch (e) { }
+
+            throw err;
         }
+
+        // 移除事件监听器
+        if (this.ws) {
+            this.ws.removeListener('close', onWsClose);
+        }
+
         // 当 for-await 结束时，可能是因为文件读完，或因为暂停/销毁流导致提前结束。
         if (this.isPaused || this.isCancelled) {
             // 如果被暂停或取消，不发送文件结束，等待 resume 或用户操作。
             this.sendingInProgress = false;
-   
+
             // activeFilePath 保留以便 resume 使用（若取消则清理）
             if (this.isCancelled) {
                 this.activeFilePath = null;
-                this.pendingAcks.clear();
-                this.ackTimeouts.forEach(timeout => clearTimeout(timeout));
-                this.ackTimeouts.clear();
+                this.clearTimeouts();
             }
             try {
                 fileStream.off('error', onStreamError);
@@ -877,8 +1148,17 @@ export class FileTransferClient {
             return;
         }
 
+        // 检查WebSocket连接状态
+        if (!this.checkWebSocketConnection(fileStream, onWsClose, onStreamError, onStreamClose)) {
+            throw new Error('WebSocket connection lost during file transfer');
+        }
+
         // 等待所有块被确认
         while (this.pendingAcks.size > 0) {
+            // 检查WebSocket连接状态
+            if (!this.checkWebSocketConnection(fileStream, onWsClose, onStreamError, onStreamClose)) {
+                throw new Error('WebSocket connection lost during file transfer');
+            }
             await this.waitForAcks();
         }
 
@@ -972,16 +1252,19 @@ export class FileTransferClient {
             this.fileStream = null;
         }
 
-        // 清理所有待确认的块和超时定时器，避免残留定时器在取消后触发
-        this.pendingAcks.clear();
-        this.ackTimeouts.forEach(timeout => clearTimeout(timeout));
-        this.ackTimeouts.clear();
+        this.clearTimeouts();
 
         const cancelMsg: FileCancelMessage = {
             type: MessageType.FILE_CANCEL,
             filename: filename
         };
         this.ws.send(this.encodeMessage(cancelMsg));
+    }
+
+    private clearTimeouts() {
+        this.pendingAcks.clear();
+        this.ackTimeouts.forEach(timeout => clearTimeout(timeout));
+        this.ackTimeouts.clear();
     }
 
     private waitForAcks(): Promise<void> {
@@ -1006,9 +1289,39 @@ export class FileTransferClient {
 
 
     public disconnect() {
+        console.log('Disconnecting client');
+
+        // 设置取消状态以停止任何正在进行的传输
+        this.isCancelled = true;
+
+        // 如果有文件流，销毁它
+        if (this.fileStream) {
+            try {
+                this.fileStream.destroy();
+                console.log('File stream destroyed');
+            } catch (e) {
+                console.error('Error destroying file stream:', e);
+            }
+            this.fileStream = null;
+        }
+
+        // 清理所有待确认的块和超时定时器
+        this.clearTimeouts();
+
+        // 重置状态
+        this.sendingInProgress = false;
+        this.activeFilePath = null;
+
         if (this.ws) {
-            this.ws.close();
+            try {
+                this.ws.close();
+                console.log('WebSocket closed');
+            } catch (e) {
+                console.error('Error closing WebSocket:', e);
+            }
             this.ws = null;
         }
+
+        console.log('Client disconnected');
     }
 }

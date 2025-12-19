@@ -4,21 +4,21 @@
       <div class="logo">
         <i class="fas fa-exchange-alt"></i>
       </div>
-      <h1 class="welcome-text">欢迎使用文件传输器</h1>
-      <p class="subtitle">安全、快速地在设备间传输文件。支持大文件传输，操作简单便捷。</p>
+      <h1 class="welcome-text">{{ $t('title') }}</h1>
+      <p class="subtitle">{{ $t('home.subtitle') }}</p>
       
       <div class="action-buttons">
         <div class="action-btn send" @click="goToSend">
           <div class="action-icon">
             <i class="fas fa-file-export"></i>
           </div>
-          <div class="action-text">发送文件</div>
+          <div class="action-text">{{ $t('home.send') }}</div>
         </div>
         <div class="action-btn receive" @click="goToReceive">
           <div class="action-icon">
             <i class="fas fa-file-import"></i>
           </div>
-          <div class="action-text">接收文件</div>
+          <div class="action-text">{{ $t('home.receive') }}</div>
         </div>
       </div>
     </div>

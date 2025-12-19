@@ -1,9 +1,11 @@
-import { app } from 'electron';
 import {existsSync, readFileSync} from 'fs';
 import {join} from 'path';
+import {type Language } from '../common/types';
+
+import { settings } from './settings';
 
 class I18n {
-  private locale: string;
+  private locale: Language ;
   private messages: Record<string, string>;
   private static instance: I18n | null = null;
 
@@ -14,7 +16,7 @@ class I18n {
     return this.instance;
   }
   private constructor() {
-    this.locale = app.getLocale();
+    this.locale = settings.settingData.language || 'en';
     this.messages = {};
     this.loadMessages();
   }
@@ -22,15 +24,14 @@ class I18n {
 
   private loadMessages(): void {
     try {
-      const localesPath = join(__dirname, '../locales');
-      const filePath = join(localesPath, `${this.locale}.json`);
+      const filePath = join(__dirname, 'locales', `${this.locale}.json`);
       
       if (existsSync(filePath)) {
         const data = readFileSync(filePath, 'utf-8');
         this.messages = JSON.parse(data);
       } else {
         // Fallback to default language (e.g., English)
-        const defaultFilePath = join(localesPath, 'en.json');
+        const defaultFilePath = join(__dirname, 'locales', 'en.json');
         if (existsSync(defaultFilePath)) {
           const data = readFileSync(defaultFilePath, 'utf-8');
           this.messages = JSON.parse(data);
@@ -55,7 +56,7 @@ class I18n {
     return message;
   }
 
-  public setLocale(locale: string): void {
+  public setLocale(locale: Language): void {
     this.locale = locale;
     this.loadMessages();
   }

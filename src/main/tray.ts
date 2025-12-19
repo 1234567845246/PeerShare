@@ -1,14 +1,15 @@
 import { type BrowserWindow, Menu, Tray } from "electron";
 import { join } from "path";
+import { i18n } from "./i18n";
 
 
 class SystemTray{
     private tray :Tray;
     constructor(private mainwindows:BrowserWindow){
         this.tray = new Tray(join(__dirname,'icon.png'));
-        this.tray.setToolTip('Peershare');
+        this.tray.setToolTip(i18n.t('title'));
         this.tray.setContextMenu(Menu.buildFromTemplate([{
-            label:'退出',
+            label:i18n.t('tray.exit'),
             role:'quit'
         }]))
         this.tray.on('double-click',()=>{
@@ -23,8 +24,12 @@ class SystemTray{
         }
     }
 
-    public setTitle(title:string){
-        this.tray.setTitle(title);
+    public changelang(){
+        this.tray.setToolTip(i18n.t('title'));
+        this.tray.setContextMenu(Menu.buildFromTemplate([{
+            role:'quit',
+            label:i18n.t('tray.exit')
+        }]))
     }
 
 

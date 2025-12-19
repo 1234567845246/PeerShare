@@ -3,7 +3,7 @@
     <div class="receive-page">
       <div class="connection-status">
         <div class="status-indicator">
-          <div class="status-dot" :class="connectionStatus"></div>
+          <div class="status-dot" :class="connectionStatusClass"></div>
           <div class="status-text">{{ statusText }}</div>
         </div>
         <p class="connection-info">{{ connectionInfo }}</p>
@@ -11,13 +11,25 @@
           <input class="connection-address" v-model="serverPort"/>
         </div>
         <button class="btn primary" @click="toggleReceiveService">
-          {{ isReceiving ? '停止接收服务' : '启动接收服务' }}
+          {{ isReceiving ? $t('receive.stopReceiving') : $t('receive.startReceiving') }}
         </button>
+      </div>
+      
+      <!-- 连接状态通知区域 -->
+      <div class="connection-notifications" v-if="connectionStatus.length > 0">
+        <div 
+          v-for="(status, index) in connectionStatus" 
+          :key="index"
+          class="notification-item"
+          :class="`notification-${status.type}`"
+        >
+          {{ status.message }}
+        </div>
       </div>
 
       <h2 class="section-title">
         <i class="fas fa-download"></i>
-        接收文件
+        {{ $t('receive.title') }}
       </h2>
       
       <div class="transfer-list">
@@ -55,11 +67,11 @@
             <button class="btn secondary" @click="pauseResumeFile(file)" v-show="!file.isCancel && !file.isCompleted">
               <i class="fas fa-pause" v-if="!file.isPaused"></i>
               <i class="fas fa-play" v-if="file.isPaused"></i>
-              {{ file.isPaused ? '恢复' : '暂停' }}
+              {{ file.isPaused ? $t('receive.resume') : $t('receive.pause') }}
             </button>
             <button class="btn secondary" @click="cancelFile(file)" v-show="!file.isCompleted && !file.isPaused">
               <i class="fas fa-times"></i>
-              取消
+              {{ $t('receive.cancel') }}
             </button>
           </div>
         </div>
@@ -73,11 +85,17 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { formatFileSize ,formatRate } from '../../common/tools'
 import {type ServerTransferStatus } from '../../common/types'
 import { useAppSettings } from '../setting/setting'
-
+import { useI18n } from 'vue-i18n'
+const {t} = useI18n()
 
 // 响应式数据
 const isReceiving = ref(false)
 const serverPort = ref(useAppSettings().settings.defaultServerPort)
+const connectionStatus = ref<{ 
+  type: 'info' | 'success' | 'error',
+  message: string,
+  timestamp: number
+}[]>([])
 const receivedFiles = ref<Array<{
   name: string
   progress: number
@@ -91,19 +109,19 @@ const receivedFiles = ref<Array<{
 }>>([])
 
 // 计算属性
-const connectionStatus = computed(() => {
+const connectionStatusClass = computed(() => {
   if (!isReceiving.value) return 'waiting'
   return 'connected'
 })
 
 const statusText = computed(() => {
-  if (!isReceiving.value) return '等待连接'
-  return '已连接'
+  if (!isReceiving.value) return t('receive.waitingForConnection')
+  return t('receive.connected')
 })
 
 const connectionInfo = computed(() => {
-  if (!isReceiving.value) return '接收器正在等待发送方连接'
-  return '接收服务正在运行，等待文件传输...'
+  if (!isReceiving.value) return t('receive.waitForSenderConnection')
+  return t('receive.runningReceiveService')
 })
 
 
@@ -111,17 +129,17 @@ const connectionInfo = computed(() => {
 function getStatusText(status: 'complete' | 'in-progress' | 'error' | 'cancel' | 'paused'): string {
   switch (status) {
     case 'complete':
-      return '已完成'
+      return t('receive.complete')
     case 'in-progress':
-      return '接收中'
+      return t('receive.inProgress')
     case 'error':
-      return '错误'
+      return t('receive.error')
     case 'cancel':
-      return '取消'
+      return t('receive.cancel')
     case 'paused':
-      return '已暂停'
+      return t('receive.paused') 
     default:
-      return '未知'
+      return t('receive.unknown')
   }
 }
 
@@ -134,26 +152,26 @@ const toggleReceiveService = async () => {
       if (result.success) {
         isReceiving.value = true
         // 添加系统通知
-        // receivedFiles.value.unshift({
-        //   name: `接收服务已启动 (端口: ${serverPort.value})`,
-        //   progress: 0,
-        //   status: 'complete'
-        // })
+        connectionStatus.value.unshift({
+          type: 'success',
+          message: t('receive.receiveServiceStarted',{'serverPort':serverPort.value}),
+          timestamp: Date.now()
+        })
       } else {
         // 添加错误通知
-        // receivedFiles.value.unshift({
-        //   name: `启动失败: ${result.message}`,
-        //   progress: 0,
-        //   status: 'error'
-        // })
+        connectionStatus.value.unshift({
+          type: 'error',
+          message: t('receive.receiveServiceStartFailed') + `: ${result.message}`,
+          timestamp: Date.now()
+        })
       }
     } catch (error: any) {
       // 添加错误通知
-      // receivedFiles.value.unshift({
-      //   name: `启动错误: ${error.message || '未知错误'}`,
-      //   progress: 0,
-      //   status: 'error'
-      // })
+      connectionStatus.value.unshift({
+        type: 'error',
+        message: t('receive.receiveServiceStartError') + `: ${error.message || t('receive.unknownError')}`,
+        timestamp: Date.now()
+      })
     }
   } else {
     // 停止接收服务
@@ -162,26 +180,26 @@ const toggleReceiveService = async () => {
       if (result.success) {
         isReceiving.value = false
         // 添加系统通知
-        // receivedFiles.value.unshift({
-        //   name: '接收服务已停止',
-        //   progress: 0,
-        //   status: 'complete'
-        // })
+        connectionStatus.value.unshift({
+          type: 'info',
+          message: t('receive.receiveServiceStopped'),
+          timestamp: Date.now()
+        })
       } else {
         // 添加错误通知
-        // receivedFiles.value.unshift({
-        //   name: `停止失败: ${result.message}`,
-        //   progress: 0,
-        //   status: 'error'
-        // })
+        connectionStatus.value.unshift({
+          type: 'error',
+          message: t('receive.receiveServiceStopFailed') + `: ${result.message}`,
+          timestamp: Date.now()
+        })
       }
     } catch (error: any) {
       // 添加错误通知
-      // receivedFiles.value.unshift({
-      //   name: `停止错误: ${error.message || '未知错误'}`,
-      //   progress: 0,
-      //   status: 'error'
-      // })
+      connectionStatus.value.unshift({
+        type: 'error',
+        message: t('receive.receiveServiceStopError') + `: ${error.message || t('receive.unknownError')}`,
+        timestamp: Date.now()
+      })
     }
   }
 }
@@ -215,10 +233,10 @@ const pauseResumeFile = async (file: { name: string; clientId: string; isPaused?
 const cancelFile = async (file: { name: string; clientId: string; isCancel: boolean }) => {
   try {
     if(file.isCancel){
-      alert(`文件 "${file.name}" 已取消，无需重复操作。`);
+      alert(t('receive.fileAlreadyCancelled', { fileName: file.name }));
       return;
     }
-    if(!confirm(`确定要取消接收文件 "${file.name}" 吗？`)){
+    if(!confirm(t('receive.cancelFileConfirmation', { fileName: file.name }))){
       return;
     }
     const result = await window.electronAPI.cancelFileTransferFromServer(file.clientId, file.name);
@@ -312,12 +330,11 @@ const handleFileTransferStatus = (data: ServerTransferStatus) => {
 // 处理文件传输错误
 const handleFileTransferError = (error: { message: string }) => {
   // 添加错误通知
-  // receivedFiles.value.unshift({
-  //   name: `传输错误: ${error.message}`,
-  //   progress: 0,
-  //   size: 0,
-  //   status: 'error'
-  // })
+  connectionStatus.value.unshift({
+    type: 'error',
+    message: `传输错误: ${error.message}`,
+    timestamp: Date.now()
+  })
 }
 
 // 组件挂载时设置事件监听器
@@ -564,5 +581,35 @@ onUnmounted(() => {
   display: flex;
   justify-content: flex-end;
   margin-top: 10px;
+}
+
+/* 连接状态通知样式 */
+.connection-notifications {
+  margin: 15px 0;
+}
+
+.notification-item {
+  padding: 10px 15px;
+  border-radius: 5px;
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+
+.notification-info {
+  background-color: #d1ecf1;
+  color: #0c5460;
+  border: 1px solid #bee5eb;
+}
+
+.notification-success {
+  background-color: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.notification-error {
+  background-color: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
 }
 </style>

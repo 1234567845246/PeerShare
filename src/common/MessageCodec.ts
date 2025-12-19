@@ -13,7 +13,6 @@ export const MessageType = {
     FILE_CANCEL: 11,  //取消传输
     FILE_CANCEL_ACK: 12,
     FILE_CONTROL: 13, //服务端控制请求
-    FILE_CLOSE: 14  //关闭文件传输
 } as const;
 
 
@@ -95,7 +94,7 @@ export type FileCloseMessage = {
     type: MessageType;
 }
 
-export type FileMessage = FileStartMessage | FileStartAckMessage | FileChunkMessage | FileChunkAckMessage | FileEndMessage | FilePauseMessage | FilePauseAckMessage | FileResumeMessage | FileResumeAckMessage | FileCancelMessage | FileCancelAckMessage | FileControlMessage;
+export type FileMessage = FileStartMessage | FileStartAckMessage | FileChunkMessage | FileChunkAckMessage | FileEndMessage | FileCloseMessage | FilePauseMessage | FilePauseAckMessage | FileResumeMessage | FileResumeAckMessage | FileCancelMessage | FileCancelAckMessage | FileControlMessage;
 
 const MAGIC_NUMBER = 0x46544D53; // "FTMS"
 const HEADER_SIZE = 16;
@@ -158,14 +157,7 @@ export class MessageCodec {
                 fileEndBuffer.writeUInt32BE(0, 12);
                 return fileEndBuffer;
             }
-            case MessageType.FILE_CLOSE: {
-                const fileCloseBuffer = Buffer.alloc(HEADER_SIZE);
-                fileCloseBuffer.writeUInt32BE(MAGIC_NUMBER, 0);
-                fileCloseBuffer.writeUInt32BE(MessageType.FILE_CLOSE, 4);
-                fileCloseBuffer.writeUInt32BE(0, 8);
-                fileCloseBuffer.writeUInt32BE(0, 12);
-                return fileCloseBuffer;
-            }
+      
         
             case MessageType.FILE_PAUSE_ACK: {
                 const pauseAckFilenameBuffer = Buffer.from((message as FilePauseAckMessage).filename, 'utf8');
@@ -341,8 +333,7 @@ export class MessageCodec {
                 const controlFilename = buffer.subarray(HEADER_SIZE, HEADER_SIZE + controlFilenameLength).toString('utf8');
                 return { type: MessageType.FILE_CONTROL, controlType, filename: controlFilename };
             }
-            case MessageType.FILE_CLOSE:
-                return { type: MessageType.FILE_CLOSE };
+         
 
             case MessageType.FILE_END:
                 return { type: MessageType.FILE_END };

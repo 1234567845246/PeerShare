@@ -24,7 +24,6 @@ export function useAppSettings() {
             exitOrMinimizeToTray: unref(appSettings).exitOrMinimizeToTray
         }
         const result = await window.electronAPI.saveSettings(setting);
-        console.log('Settings saved:', result);
         return result;
     }
 

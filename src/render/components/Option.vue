@@ -23,17 +23,16 @@
       
       <!-- 选项内容 -->
       <div class="option-text">
-        <div class="option-label">{{ label }}</div>
-       
+        <div class="option-label">{{ dynamicLabel }}</div>
       </div>
       <!-- 右侧标记（如：默认） -->
-      <div v-if="default" class="option-right">默认</div>
+      <div v-if="default" class="option-right">{{ $t('option.default') }}</div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, inject, ref } from 'vue';
+import { computed, inject, ref, watch } from 'vue';
 import type { SelectOption ,OptionProps} from '../../common/types';
 
 
@@ -42,11 +41,7 @@ const props = withDefaults(defineProps<OptionProps>(), {
   default:false,
   disabled:false
 });
-console.log(props.default,props.disabled);
 
-const isHovered = ref(false);
-
-// 从父组件获取上下文
 const selectContext = inject('selectContext', {
   selectedValue: { value: null },
   hoveredDescription: ref(''),
@@ -54,8 +49,30 @@ const selectContext = inject('selectContext', {
   updateHoveredDescription: (_description: string | undefined) => {},
   clearHoveredDescription: () => {},
   setError: (_message: string) => {},
-  clearError: () => {}
+  clearError: () => {},
+  updateOptionProperty: (_value: string | number, _property: keyof SelectOption, _newValue: string|number) => {}
 });
+
+// 创建响应式数据来存储动态变化的label和description
+const dynamicLabel = ref(props.label);
+const dynamicDescription = ref(props.description);
+
+// 监听props变化并更新响应式数据
+watch(() => props.label, (newLabel) => {
+  dynamicLabel.value = newLabel;
+  selectContext.updateOptionProperty(props.value, 'label', newLabel);
+},{ immediate: true });
+
+watch(() => props.description, (newDescription) => {
+  dynamicDescription.value = newDescription;
+  selectContext.updateOptionProperty(props.value, 'description', newDescription);
+},{ immediate: true });
+
+
+
+
+const isHovered = ref(false);
+
 
 // 计算属性
 const isSelected = computed(() => {
@@ -71,8 +88,8 @@ const handleClick = () => {
   
   const option: SelectOption = {
     value: props.value,
-    label: props.label,
-    description: props.description,
+    label: dynamicLabel.value,
+    description: dynamicDescription.value,
     disabled: props.disabled,
     default:props.default,
   };
@@ -85,8 +102,8 @@ const handleMouseEnter = () => {
   if (props.disabled) return;
   
   isHovered.value = true;
-  if (props.description) {
-    selectContext.updateHoveredDescription(props.description);
+  if (dynamicDescription.value) {
+    selectContext.updateHoveredDescription(dynamicDescription.value);
   }
 };
 

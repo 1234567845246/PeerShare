@@ -1,12 +1,13 @@
 // src\main\mainEntry.ts
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell } from 'electron'
 import { join } from 'path'
-
+import {existsSync} from 'fs'
 import ProgressTracker from './progressTracker'
 import { FileTransferServer, FileTransferClient } from './fileTransferServer'
 import { type ServerTransferStatus ,type ClientTransferStatus} from '../common/types'
 import { settings } from './settings'
 import  SystemTray from './tray'
+import { i18n } from './i18n'
 
 class Application {
     private mainWindow: BrowserWindow | null = null;
@@ -322,6 +323,10 @@ class Application {
 
         ipcMain.handle('save-settings', async (_, newSettings) => {
             try {
+                if(settings.settingData.language !== newSettings.language) {
+                    i18n.setLocale(newSettings.language);
+                    this.systemTray?.changelang();
+                }
                 settings.setSettingsSync(newSettings);
                 return { success: true, message: 'Settings saved successfully' };
             } catch (error: any) {
@@ -331,6 +336,12 @@ class Application {
 
         ipcMain.on('open-dev-tools', () => {
             this.mainWindow?.webContents.openDevTools({ mode: 'undocked' });
+        })
+
+        ipcMain.on('open-file-explorer', (_, path:string) => {
+            if(existsSync(path)){
+                shell.showItemInFolder(path);
+            }
         })
 
         ipcMain.handle('choose-directory', async (_,title:string) => {
@@ -356,7 +367,7 @@ class Application {
             minWidth: 800,
             width: 1000,
             height: 800,
-            title:'PeerShare',
+            title:i18n.t('title'),
             icon :nativeImage.createFromPath(join(__dirname, 'icon.png')),
             webPreferences: {
                 preload: join(__dirname, 'preload.js'),

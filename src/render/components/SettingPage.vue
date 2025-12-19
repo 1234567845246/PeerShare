@@ -2,52 +2,52 @@
     <div class="setting-page">
         <h2 class="section-title">
             <i class="fas fa-cog"></i>
-            设置
+            {{ $t('setting.title') }}
         </h2>
 
         <div class="card setting-card">
             <div class="form-row">
-                <label class="form-label">默认接收端口</label>
+                <label class="form-label">{{ $t('setting.defaultServerPort') }}</label>
                 <input type="number" v-model.number="setting.defaultServerPort" class="form-input" min="1"
                     max="65535" />
             </div>
 
             <div class="form-row">
-                <label class="form-label">默认下载地址</label>
+                <label class="form-label">{{ $t('setting.defaultDownloadPath') }}</label>
                 <div class="form-input-row">
                     <input type="text" v-model="setting.defaultDownloadPath" class="form-input"
-                        placeholder="请选择或输入默认下载地址" />
-                    <button class="btn small" @click="pickDirectory">选择</button>
+                        :placeholder="t('setting.defaultDownloadPathplaceholder')" />
+                    <button class="btn small" @click="pickDirectory">{{ $t('setting.choosebtn') }}</button>
                 </div>
             </div>
 
             <div class="form-row checkbox-row">
                 <input type="checkbox" id="overwrite" v-model="setting.overwriteExistingFiles" />
-                <label for="overwrite">是否覆盖原有文件</label>
+                <label for="overwrite">{{ $t('setting.overwriteExistingFiles') }}</label>
             </div>
-        
+
             <div class="form-row checkbox-row">
                 <input type="checkbox" id="tray" v-model="setting.exitOrMinimizeToTray" />
-                <label for="tray">窗口关闭时最小化到系统托盘</label>
+                <label for="tray">{{ $t('setting.exitOrMinimizeToTray') }}</label>
             </div>
             <div class="form-row">
-                <label class="form-label">语言</label>
-                <Select v-model="setting.language" placeholder="选择语言" >
+                <label class="form-label">{{ $t('setting.language') }}</label>
+                <Select v-model="setting.language" placeholder="选择语言">
                     <Option value="zh" label="简体中文" description="中文简体" default />
-                    <Option value="en" label="English" description="English"  />
+                    <Option value="en" label="English" description="English" />
+                    <Option value="ja" label="日本語" description="日本語" />
                 </Select>
             </div>
             <div class="form-row">
-                <label class="form-label">通知类型</label>
-                <Select v-model="setting.NotificationType" placeholder="选择通知类型" >
-                    <Option value="system" label="系统通知" description="使用系统默认的通知方式" />
-                    <Option value="custom" label="自定义通知" description="使用自定义的通知样式和行为" />
-                    <Option value="none" label="无通知" description="不显示任何通知消息" default/>
+                <label class="form-label">{{ $t('setting.notificationType') }}</label>
+                <Select v-model="setting.NotificationType" placeholder="选择通知类型" :key="locale">
+                    <Option v-for="(item, index) in notificationTypeopton" :key="index" :value="item.value"
+                        :label="item.label" :description="item.description" :default="item.default" />
                 </Select>
             </div>
             <div class="action-row">
-                <button class="btn primary" @click="saveSettings">保存</button>
-                <button class="btn" @click="resetDefaults">重置为默认</button>
+                <button class="btn primary" @click="saveSettings">{{ $t('setting.save') }}</button>
+                <button class="btn" @click="resetDefaults">{{ $t('setting.reset') }}</button>
                 <span class="status">{{ statusMessage }}</span>
             </div>
         </div>
@@ -56,13 +56,33 @@
 
 
 <script setup lang="ts">
-import { reactive, ref, onMounted, toRefs } from 'vue'
+import { reactive, ref, onMounted, toRefs, watch } from 'vue'
 import { useAppSettings } from '../setting/setting'
 import Select from './Select.vue'
 import Option from './Option.vue'
+import { useI18n } from 'vue-i18n'
+const { t, locale } = useI18n()
 
 const statusMessage = ref('')
 
+const notificationTypeopton = ref([{
+    value: 'system', label: t('setting.notificationTypeoption1'), description: t('setting.notificationTypeoption1desc'), default: false
+}, {
+    value: 'custom', label: t('setting.notificationTypeoption2'), description: t('setting.notificationTypeoption2desc'), default: false
+}, {
+    value: 'none', label: t('setting.notificationTypeoption3'), description: t('setting.notificationTypeoption3desc'), default: true
+}])
+
+// 监听语言变化，更新选项文本
+watch(locale, () => {
+    notificationTypeopton.value = [{
+        value: 'system', label: t('setting.notificationTypeoption1'), description: t('setting.notificationTypeoption1desc'), default: false
+    }, {
+        value: 'custom', label: t('setting.notificationTypeoption2'), description: t('setting.notificationTypeoption2desc'), default: false
+    }, {
+        value: 'none', label: t('setting.notificationTypeoption3'), description: t('setting.notificationTypeoption3desc'), default: true
+    }]
+})
 const setting = reactive(toRefs(useAppSettings().settings))
 
 // 从主进程或 localStorage 加载设置
@@ -80,20 +100,26 @@ const pickDirectory = async () => {
 
     try {
         if (window.electronAPI && window.electronAPI.chooseDirectory) {
-            const dir = await window.electronAPI.chooseDirectory('选择默认下载目录')
+            const dir = await window.electronAPI.chooseDirectory(t('setting.choosedir'))
             if (dir) {
                 setting.defaultDownloadPath = dir
             }
         } else {
-            statusMessage.value = '无法打开目录选择对话框'
+            statusMessage.value = t('setting.couldNotOpenDirectoryDialog')
         }
     } catch (err: any) {
-        statusMessage.value = `选择目录失败: ${err?.message || err}`
+        statusMessage.value = `选择目录失败: ${err?.message || err}` // Changed from statusMessage.value = `选择目录失败: ${err?.message || err}` to use t function
     }
 }
 
 // 保存设置
 const saveSettings = async () => {
+
+    if (locale.value !== setting.language) {
+        locale.value = setting.language
+    }
+
+
     useAppSettings().updateSettings({
         overwriteExistingFiles: setting.overwriteExistingFiles,
         defaultServerPort: setting.defaultServerPort,
@@ -102,7 +128,8 @@ const saveSettings = async () => {
         exitOrMinimizeToTray: setting.exitOrMinimizeToTray,
         language: setting.language
     })
-    useAppSettings().saveSettings();
+    let res = await useAppSettings().saveSettings();
+    statusMessage.value = res ? t('setting.saveSuccess') : t('setting.saveFailed')
 }
 
 const resetDefaults = () => {
