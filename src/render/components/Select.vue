@@ -431,9 +431,9 @@ const updateSlotOptions = () => {
         if (props.value === undefined) return;
         
         const index = reactiveSlotOptions.value.findIndex(opt => opt.value === props.value);
-        if (index !== -1) {
+        if (index !== -1  && reactiveSlotOptions.value[index]) {
           // 更新现有选项的属性
-          if (props.label !== undefined) {
+          if (props.label !== undefined ){
             reactiveSlotOptions.value[index].label = props.label;
           }
           if (props.description !== undefined) {
@@ -465,7 +465,7 @@ const updateSlotOptions = () => {
 const updateOptionProperty = (value: string | number, property: keyof SelectOption, newValue: string | number) => {
   // 更新插槽选项
   const slotIndex = reactiveSlotOptions.value.findIndex(opt => opt.value === value);
-  if (slotIndex !== -1) {
+  if (slotIndex !== -1 && reactiveSlotOptions.value[slotIndex]) {
     reactiveSlotOptions.value[slotIndex] = {
       ...reactiveSlotOptions.value[slotIndex],
       [property]: newValue

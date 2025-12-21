@@ -8,21 +8,17 @@
         </div>
         <p class="connection-info">{{ connectionInfo }}</p>
         <div style="width: 100%; display: flex; justify-content: center;">
-          <input class="connection-address" v-model="serverPort"/>
+          <input class="connection-address" v-model="serverPort" />
         </div>
         <button class="btn primary" @click="toggleReceiveService">
           {{ isReceiving ? $t('receive.stopReceiving') : $t('receive.startReceiving') }}
         </button>
       </div>
-      
+
       <!-- 连接状态通知区域 -->
       <div class="connection-notifications" v-if="connectionStatus.length > 0">
-        <div 
-          v-for="(status, index) in connectionStatus" 
-          :key="index"
-          class="notification-item"
-          :class="`notification-${status.type}`"
-        >
+        <div v-for="(status, index) in connectionStatus" :key="index" class="notification-item"
+          :class="`notification-${status.type}`">
           {{ status.message }}
         </div>
       </div>
@@ -31,7 +27,7 @@
         <i class="fas fa-download"></i>
         {{ $t('receive.title') }}
       </h2>
-      
+
       <div class="transfer-list">
         <div class="transfer-item" v-for="(file, index) in receivedFiles" :key="index">
           <div class="transfer-header">
@@ -40,7 +36,12 @@
                 <i class="fas fa-file"></i>
               </div>
               <div>
-                <div class="transfer-name">{{ file.name }}</div>
+                <div class="transfer-name">
+                  {{ file.name }}
+                  <button class="muted-btn" @click="openFileExplorer(file.path)">
+                    <i class="fas fa-folder-open"></i>
+                  </button>
+                </div>
                 <div class="transfer-size-rate">
                   <div class="transfer-size">{{ formatFileSize(file.size) }}</div>
                   <div class="transfer-rate">{{ formatRate(file.receiveRate || 0) }}</div>
@@ -51,17 +52,17 @@
               {{ getStatusText(file.status) }}
             </div>
           </div>
-          
+
           <!-- 添加进度条 -->
           <div class="progress-section" v-if="file.status === 'in-progress' || file.status === 'complete'">
             <div class="progress-bar">
               <div class="progress-fill" :style="{ width: file.progress + '%' }"></div>
             </div>
-            <div class="progress-info" >
+            <div class="progress-info">
               <span>{{ Math.round(file.progress) }}%</span>
             </div>
           </div>
-          
+
           <!-- 添加控制按钮 -->
           <div class="transfer-controls">
             <button class="btn secondary" @click="pauseResumeFile(file)" v-show="!file.isCancel && !file.isCompleted">
@@ -82,25 +83,26 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { formatFileSize ,formatRate } from '../../common/tools'
-import {type ServerTransferStatus } from '../../common/types'
+import { formatFileSize, formatRate } from '../../common/tools'
+import { type ServerTransferStatus } from '../../common/types'
 import { useAppSettings } from '../setting/setting'
 import { useI18n } from 'vue-i18n'
-const {t} = useI18n()
+const { t } = useI18n()
 
 // 响应式数据
 const isReceiving = ref(false)
 const serverPort = ref(useAppSettings().settings.defaultServerPort)
-const connectionStatus = ref<{ 
+const connectionStatus = ref<{
   type: 'info' | 'success' | 'error',
   message: string,
   timestamp: number
 }[]>([])
 const receivedFiles = ref<Array<{
   name: string
+  path: string
   progress: number
   clientId: string
-  size:number
+  size: number
   status: 'complete' | 'in-progress' | 'error' | 'cancel' | 'paused'
   receiveRate: number // 添加接收速率
   isPaused: boolean // 添加暂停状态
@@ -137,7 +139,7 @@ function getStatusText(status: 'complete' | 'in-progress' | 'error' | 'cancel' |
     case 'cancel':
       return t('receive.cancel')
     case 'paused':
-      return t('receive.paused') 
+      return t('receive.paused')
     default:
       return t('receive.unknown')
   }
@@ -154,7 +156,7 @@ const toggleReceiveService = async () => {
         // 添加系统通知
         connectionStatus.value.unshift({
           type: 'success',
-          message: t('receive.receiveServiceStarted',{'serverPort':serverPort.value}),
+          message: t('receive.receiveServiceStarted', { 'serverPort': serverPort.value }),
           timestamp: Date.now()
         })
       } else {
@@ -229,14 +231,18 @@ const pauseResumeFile = async (file: { name: string; clientId: string; isPaused?
   }
 }
 
+const openFileExplorer = (path: string) => {
+  window.electronAPI.openFileExplorer(path);
+}
+
 // 取消文件传输
 const cancelFile = async (file: { name: string; clientId: string; isCancel: boolean }) => {
   try {
-    if(file.isCancel){
+    if (file.isCancel) {
       alert(t('receive.fileAlreadyCancelled', { fileName: file.name }));
       return;
     }
-    if(!confirm(t('receive.cancelFileConfirmation', { fileName: file.name }))){
+    if (!confirm(t('receive.cancelFileConfirmation', { fileName: file.name }))) {
       return;
     }
     const result = await window.electronAPI.cancelFileTransferFromServer(file.clientId, file.name);
@@ -255,9 +261,10 @@ const cancelFile = async (file: { name: string; clientId: string; isCancel: bool
 // 处理文件传输状态更新
 const handleFileTransferStatus = (data: ServerTransferStatus) => {
   console.log('Received file transfer status:', data);
-  if(data.type === 'transfer-start'){
+  if (data.type === 'transfer-start') {
     receivedFiles.value.unshift({
       name: data.filename,
+      path: data.filepath,
       progress: 0,
       size: data.filesize,
       clientId: data.clientId,
@@ -268,7 +275,7 @@ const handleFileTransferStatus = (data: ServerTransferStatus) => {
       isCompleted: false
     })
   }
-  else if(data.type === 'transfer-progress'){
+  else if (data.type === 'transfer-progress') {
     const existingFileIndex = receivedFiles.value.findIndex((file: { name: string; clientId: string }) => file.name === data.filename && file.clientId === data.clientId)
     if (existingFileIndex >= 0) {
       const fileToUpdate = receivedFiles.value[existingFileIndex]
@@ -281,7 +288,7 @@ const handleFileTransferStatus = (data: ServerTransferStatus) => {
         fileToUpdate.isPaused = false;
       }
     }
-  }else if(data.type === 'transfer-complete'){
+  } else if (data.type === 'transfer-complete') {
     const existingFileIndex = receivedFiles.value.findIndex((file: { name: string; clientId: string }) => file.name === data.filename && file.clientId === data.clientId)
     if (existingFileIndex >= 0) {
       const fileToUpdate = receivedFiles.value[existingFileIndex]
@@ -294,17 +301,17 @@ const handleFileTransferStatus = (data: ServerTransferStatus) => {
         fileToUpdate.isCompleted = true;
       }
     }
-  } else if(data.type === 'transfer-pause'){
+  } else if (data.type === 'transfer-pause') {
 
     const existingFileIndex = receivedFiles.value.findIndex((file: { name: string; clientId: string }) => file.name === data.filename && file.clientId === data.clientId)
     if (existingFileIndex >= 0) {
       const fileToUpdate = receivedFiles.value[existingFileIndex]
       if (fileToUpdate) {
         fileToUpdate.isPaused = true;
-        fileToUpdate.status = 'paused'; 
+        fileToUpdate.status = 'paused';
       }
     }
-  } else if(data.type === 'transfer-resume'){
+  } else if (data.type === 'transfer-resume') {
     const existingFileIndex = receivedFiles.value.findIndex((file: { name: string; clientId: string }) => file.name === data.filename && file.clientId === data.clientId)
     if (existingFileIndex >= 0) {
       const fileToUpdate = receivedFiles.value[existingFileIndex]
@@ -313,7 +320,7 @@ const handleFileTransferStatus = (data: ServerTransferStatus) => {
         fileToUpdate.status = 'in-progress';
       }
     }
-  } else if(data.type === 'transfer-cancel'){
+  } else if (data.type === 'transfer-cancel') {
     const existingFileIndex = receivedFiles.value.findIndex((file: { name: string; clientId: string }) => file.name === data.filename && file.clientId === data.clientId)
     if (existingFileIndex >= 0) {
       const fileToUpdate = receivedFiles.value[existingFileIndex]
@@ -444,6 +451,17 @@ onUnmounted(() => {
   font-size: 24px;
 }
 
+.muted-btn {
+  border: none;
+  outline: none;
+  background-color: var(--bg-card);
+}
+
+.muted-btn:not(:disabled):hover {
+  background-color: var(--text-muted);
+}
+
+
 .btn {
   padding: 10px 20px;
   border-radius: 5px;
@@ -519,6 +537,7 @@ onUnmounted(() => {
   color: var(--text-secondary);
   font-size: 14px;
 }
+
 .transfer-size-rate {
   display: flex;
   align-items: center;
@@ -526,7 +545,8 @@ onUnmounted(() => {
 }
 
 
-.transfer-size,.transfer-rate {
+.transfer-size,
+.transfer-rate {
   color: var(--text-secondary);
   font-size: 14px;
   font-style: italic;

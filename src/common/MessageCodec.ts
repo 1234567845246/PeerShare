@@ -89,12 +89,9 @@ export type FileControlMessage = {
     filename: string;
 }
 
-//程序退出，收到对端的关闭文件传输请求.直接断开连接
-export type FileCloseMessage = {
-    type: MessageType;
-}
 
-export type FileMessage = FileStartMessage | FileStartAckMessage | FileChunkMessage | FileChunkAckMessage | FileEndMessage | FileCloseMessage | FilePauseMessage | FilePauseAckMessage | FileResumeMessage | FileResumeAckMessage | FileCancelMessage | FileCancelAckMessage | FileControlMessage;
+
+export type FileMessage = FileStartMessage | FileStartAckMessage | FileChunkMessage | FileChunkAckMessage | FileEndMessage | FilePauseMessage | FilePauseAckMessage | FileResumeMessage | FileResumeAckMessage | FileCancelMessage | FileCancelAckMessage | FileControlMessage;
 
 const MAGIC_NUMBER = 0x46544D53; // "FTMS"
 const HEADER_SIZE = 16;

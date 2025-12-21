@@ -2,6 +2,7 @@ export type ServerTransferStatus = {
     type: 'transfer-start',
     clientId: string;
     filename: string;
+    filepath: string;
     filesize: number;
     message: string;
 } | {

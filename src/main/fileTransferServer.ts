@@ -3,7 +3,7 @@ import { createReadStream, statSync, createWriteStream, WriteStream, ReadStream,
 import { join, basename, parse } from 'path';
 import { type ClientTransferStatus, type ServerTransferStatus } from '../common/types';
 import EventEmitter from 'events';
-import { MessageCodec, MessageType, type FileStartMessage, type FileStartAckMessage, type FileChunkMessage, type FileChunkAckMessage, type FileEndMessage, type FilePauseMessage, type FilePauseAckMessage, type FileResumeMessage, type FileResumeAckMessage, type FileCancelMessage, type FileCancelAckMessage, type FileControlMessage, type FileCloseMessage, type FileMessage } from '../common/MessageCodec';
+import { MessageCodec, MessageType, type FileStartMessage, type FileStartAckMessage, type FileChunkMessage, type FileChunkAckMessage, type FileEndMessage, type FilePauseMessage, type FilePauseAckMessage, type FileResumeMessage, type FileResumeAckMessage, type FileCancelMessage, type FileCancelAckMessage, type FileControlMessage,  type FileMessage } from '../common/MessageCodec';
 import { randomUUID } from 'crypto';
 import { settings } from './settings';
 
@@ -12,6 +12,7 @@ import { settings } from './settings';
 
 interface FileInfos {
     filename: string;
+    filepath: string;
     fileSize: number;
     receivedChunks: number;
     bytesReceived: number;
@@ -194,6 +195,7 @@ export class FileTransferServer extends EventEmitter {
         this.fileStreams.set(ws, writeStream);
         this.fileInfos.set(ws, {
             filename: message.filename,
+            filepath: filePath,
             fileSize: message.fileSize,
             receivedChunks: 0,
             bytesReceived: 0,
@@ -208,7 +210,7 @@ export class FileTransferServer extends EventEmitter {
 
         // 发送确认消息
         const ackMessage: FileStartAckMessage = { type: MessageType.FILE_START_ACK };
-        this.onProgressCallbacks({ type: 'transfer-start', clientId: this.clientIds.get(ws) || 'unknown', filename: message.filename, filesize: message.fileSize, message: '' });
+        this.onProgressCallbacks({ type: 'transfer-start', clientId: this.clientIds.get(ws) || 'unknown', filename: message.filename, filepath: filePath, filesize: message.fileSize, message: '' });
         ws.send(this.encodeMessage(ackMessage));
     }
 
@@ -314,19 +316,6 @@ export class FileTransferServer extends EventEmitter {
             });
             this.fileStreams.delete(ws);
         }
-    }
-    private handleFileClose(ws: WebSocket, _: FileCloseMessage) {
-        const fileInfo = this.fileInfos.get(ws);
-        if (fileInfo) {
-            this.onProgressCallbacks({
-                type: 'transfer-close',
-                clientId: this.clientIds.get(ws) || 'unknown',
-                filename: fileInfo.filename,
-                message: '已断开连接',
-            })
-        }
-
-        this.cleanupClientResources(ws);
     }
 
     // 处理文件暂停消息
