@@ -65,7 +65,7 @@ watch(() => props.label, (newLabel) => {
 
 watch(() => props.description, (newDescription) => {
   dynamicDescription.value = newDescription;
-  selectContext.updateOptionProperty(props.value, 'description', newDescription);
+  selectContext.updateOptionProperty(props.value, 'description', newDescription || '');
 },{ immediate: true });
 
 

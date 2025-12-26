@@ -21,6 +21,7 @@ export type MessageType = typeof MessageType[keyof typeof MessageType];
 // 消息接口定义
 export type FileStartMessage = {
     type: MessageType;
+    fileId: string;
     filename: string;
     fileSize: number;
 }
@@ -47,23 +48,23 @@ export type FileEndMessage = {
 
 export type FilePauseMessage = {
     type: MessageType;
-    filename: string;
+    fileId: string;
 }
 
 export type FilePauseAckMessage = {
     type: MessageType;
-    filename: string;
+    fileId: string;
     success: boolean;
 }
 
 export type FileResumeMessage = {
     type: MessageType;
-    filename: string;
+    fileId: string;
 }
 
 export type FileResumeAckMessage = {
     type: MessageType;
-    filename: string;
+    fileId: string;
     success: boolean;
     lastChunkIndex: number;  // 最后一个分片索引
 }
@@ -72,12 +73,12 @@ export type FileResumeAckMessage = {
 
 export type FileCancelMessage = {
     type: MessageType;
-    filename: string;
+    fileId: string;
 }
 
 export type FileCancelAckMessage = {
     type: MessageType;
-    filename: string;
+    fileId: string;
     success: boolean;
 }
 
@@ -86,7 +87,7 @@ export type FileCancelAckMessage = {
 export type FileControlMessage = {
     type: MessageType;
     controlType: number; // 服务端控制类型
-    filename: string;
+    fileId: string;
 }
 
 
@@ -94,7 +95,7 @@ export type FileControlMessage = {
 export type FileMessage = FileStartMessage | FileStartAckMessage | FileChunkMessage | FileChunkAckMessage | FileEndMessage | FilePauseMessage | FilePauseAckMessage | FileResumeMessage | FileResumeAckMessage | FileCancelMessage | FileCancelAckMessage | FileControlMessage;
 
 const MAGIC_NUMBER = 0x46544D53; // "FTMS"
-const HEADER_SIZE = 16;
+const HEADER_SIZE = 32;
 
 export class MessageCodec {
     static readonly MAGIC_NUMBER = MAGIC_NUMBER;
@@ -110,13 +111,21 @@ export class MessageCodec {
             case MessageType.FILE_START: {
                 const filenameBuffer = Buffer.from((message as FileStartMessage).filename, 'utf8');
                 const filenameLength = filenameBuffer.length;
+                const fileIdBuffer = Buffer.from((message as FileStartMessage).fileId, 'utf8');
+                const fileIdLength = fileIdBuffer.length;
 
-                const fileStartBuffer = Buffer.alloc(HEADER_SIZE + filenameLength);
+                const fileStartBuffer = Buffer.alloc(HEADER_SIZE + filenameLength + fileIdLength);
                 fileStartBuffer.writeUInt32BE(MAGIC_NUMBER, 0);
                 fileStartBuffer.writeUInt32BE(MessageType.FILE_START, 4);
                 fileStartBuffer.writeUInt32BE(filenameLength, 8);
                 fileStartBuffer.writeUInt32BE((message as FileStartMessage).fileSize, 12);
+                fileStartBuffer.writeUInt32BE(fileIdLength, 16);
+                // 预留字段填充为0
+                fileStartBuffer.writeUInt32BE(0, 20);
+                fileStartBuffer.writeUInt32BE(0, 24);
+                fileStartBuffer.writeUInt32BE(0, 28);
                 filenameBuffer.copy(fileStartBuffer, HEADER_SIZE);
+                fileIdBuffer.copy(fileStartBuffer, HEADER_SIZE + filenameLength);   
                 return fileStartBuffer;
             }
             case MessageType.FILE_START_ACK: {
@@ -125,6 +134,11 @@ export class MessageCodec {
                 fileStartAckBuffer.writeUInt32BE(MessageType.FILE_START_ACK, 4);
                 fileStartAckBuffer.writeUInt32BE(0, 8);
                 fileStartAckBuffer.writeUInt32BE(0, 12);
+                // 填充额外的头部字节为0
+                fileStartAckBuffer.writeUInt32BE(0, 16);
+                fileStartAckBuffer.writeUInt32BE(0, 20);
+                fileStartAckBuffer.writeUInt32BE(0, 24);
+                fileStartAckBuffer.writeUInt32BE(0, 28);
                 return fileStartAckBuffer;
             }
             case MessageType.FILE_CHUNK: {
@@ -135,6 +149,11 @@ export class MessageCodec {
                 fileChunkBuffer.writeUInt32BE(MessageType.FILE_CHUNK, 4);
                 fileChunkBuffer.writeUInt32BE((message as FileChunkMessage).chunkIndex, 8);
                 fileChunkBuffer.writeUInt32BE(chunkLength, 12);
+                // 填充额外的头部字节为0
+                fileChunkBuffer.writeUInt32BE(0, 16);
+                fileChunkBuffer.writeUInt32BE(0, 20);
+                fileChunkBuffer.writeUInt32BE(0, 24);
+                fileChunkBuffer.writeUInt32BE(0, 28);
                 (message as FileChunkMessage).chunkData.copy(fileChunkBuffer, HEADER_SIZE);
                 return fileChunkBuffer;
             }
@@ -144,6 +163,11 @@ export class MessageCodec {
                 fileAckBuffer.writeUInt32BE(MessageType.FILE_CHUNK_ACK, 4);
                 fileAckBuffer.writeUInt32BE((message as FileChunkAckMessage).ackIndex, 8);
                 fileAckBuffer.writeUInt32BE(0, 12);
+                // 填充额外的头部字节为0
+                fileAckBuffer.writeUInt32BE(0, 16);
+                fileAckBuffer.writeUInt32BE(0, 20);
+                fileAckBuffer.writeUInt32BE(0, 24);
+                fileAckBuffer.writeUInt32BE(0, 28);
                 return fileAckBuffer;
             }
             case MessageType.FILE_END: {
@@ -152,92 +176,132 @@ export class MessageCodec {
                 fileEndBuffer.writeUInt32BE(MessageType.FILE_END, 4);
                 fileEndBuffer.writeUInt32BE(0, 8);
                 fileEndBuffer.writeUInt32BE(0, 12);
+                // 填充额外的头部字节为0
+                fileEndBuffer.writeUInt32BE(0, 16);
+                fileEndBuffer.writeUInt32BE(0, 20);
+                fileEndBuffer.writeUInt32BE(0, 24);
+                fileEndBuffer.writeUInt32BE(0, 28);
                 return fileEndBuffer;
             }
       
         
             case MessageType.FILE_PAUSE_ACK: {
-                const pauseAckFilenameBuffer = Buffer.from((message as FilePauseAckMessage).filename, 'utf8');
-                const pauseAckFilenameLength = pauseAckFilenameBuffer.length;
+                const pauseAckIdBuffer = Buffer.from((message as FilePauseAckMessage).fileId, 'utf8');
+                const pauseAckIdLength = pauseAckIdBuffer.length;
 
-                const filePauseAckBuffer = Buffer.alloc(HEADER_SIZE + pauseAckFilenameLength);
+                const filePauseAckBuffer = Buffer.alloc(HEADER_SIZE + pauseAckIdLength);
                 filePauseAckBuffer.writeUInt32BE(MAGIC_NUMBER, 0);
                 filePauseAckBuffer.writeUInt32BE(MessageType.FILE_PAUSE_ACK, 4);
-                filePauseAckBuffer.writeUInt32BE(pauseAckFilenameLength, 8);
+                filePauseAckBuffer.writeUInt32BE(pauseAckIdLength, 8);
                 filePauseAckBuffer.writeUInt32BE(0, 12);
-                pauseAckFilenameBuffer.copy(filePauseAckBuffer, HEADER_SIZE);
+                // 填充额外的头部字节为0
+                filePauseAckBuffer.writeUInt32BE(0, 16);
+                filePauseAckBuffer.writeUInt32BE(0, 20);
+                filePauseAckBuffer.writeUInt32BE(0, 24);
+                filePauseAckBuffer.writeUInt32BE(0, 28);
+                pauseAckIdBuffer.copy(filePauseAckBuffer, HEADER_SIZE);
                 return filePauseAckBuffer;
             }
             case MessageType.FILE_RESUME_ACK: {
-                const resumeAckFilenameBuffer = Buffer.from((message as FileResumeAckMessage).filename, 'utf8');
-                const resumeAckFilenameLength = resumeAckFilenameBuffer.length;
+                const resumeAckIdBuffer = Buffer.from((message as FileResumeAckMessage).fileId, 'utf8');
+                const resumeAckIdLength = resumeAckIdBuffer.length;
 
-                const fileResumeAckBuffer = Buffer.alloc(HEADER_SIZE + resumeAckFilenameLength);
+                const fileResumeAckBuffer = Buffer.alloc(HEADER_SIZE + resumeAckIdLength);
                 fileResumeAckBuffer.writeUInt32BE(MAGIC_NUMBER, 0);
                 fileResumeAckBuffer.writeUInt32BE(MessageType.FILE_RESUME_ACK, 4);
-                fileResumeAckBuffer.writeUInt32BE(resumeAckFilenameLength, 8);
+                fileResumeAckBuffer.writeUInt32BE(resumeAckIdLength, 8);
                 fileResumeAckBuffer.writeUInt32BE((message as FileResumeAckMessage).lastChunkIndex, 12);
-                resumeAckFilenameBuffer.copy(fileResumeAckBuffer, HEADER_SIZE);
+                // 填充额外的头部字节为0
+                fileResumeAckBuffer.writeUInt32BE(0, 16);
+                fileResumeAckBuffer.writeUInt32BE(0, 20);
+                fileResumeAckBuffer.writeUInt32BE(0, 24);
+                fileResumeAckBuffer.writeUInt32BE(0, 28);
+                resumeAckIdBuffer.copy(fileResumeAckBuffer, HEADER_SIZE);
                 return fileResumeAckBuffer;
             }
             case MessageType.FILE_CANCEL_ACK: {
-                const cancelAckFilenameBuffer = Buffer.from((message as FileCancelAckMessage).filename, 'utf8');
-                const cancelAckFilenameLength = cancelAckFilenameBuffer.length;
+                const cancelAckIdBuffer = Buffer.from((message as FileCancelAckMessage).fileId, 'utf8');
+                const cancelAckIdLength = cancelAckIdBuffer.length;
 
-                const fileCancelAckBuffer = Buffer.alloc(HEADER_SIZE + cancelAckFilenameLength);
+                const fileCancelAckBuffer = Buffer.alloc(HEADER_SIZE + cancelAckIdLength);
                 fileCancelAckBuffer.writeUInt32BE(MAGIC_NUMBER, 0);
                 fileCancelAckBuffer.writeUInt32BE(MessageType.FILE_CANCEL_ACK, 4);
-                fileCancelAckBuffer.writeUInt32BE(cancelAckFilenameLength, 8);
+                fileCancelAckBuffer.writeUInt32BE(cancelAckIdLength, 8);
                 fileCancelAckBuffer.writeUInt32BE((message as FileCancelAckMessage).success ? 1 : 0, 12);
-                cancelAckFilenameBuffer.copy(fileCancelAckBuffer, HEADER_SIZE);
+                // 填充额外的头部字节为0
+                fileCancelAckBuffer.writeUInt32BE(0, 16);
+                fileCancelAckBuffer.writeUInt32BE(0, 20);
+                fileCancelAckBuffer.writeUInt32BE(0, 24);
+                fileCancelAckBuffer.writeUInt32BE(0, 28);
+                cancelAckIdBuffer.copy(fileCancelAckBuffer, HEADER_SIZE);
                 return fileCancelAckBuffer;
             }
             case MessageType.FILE_CONTROL: {
-                const controlFilenameBuffer = Buffer.from((message as FileControlMessage).filename, 'utf8');
-                const controlFilenameLength = controlFilenameBuffer.length;
+                const controlIdBuffer = Buffer.from((message as FileControlMessage).fileId, 'utf8');
+                const controlIdLength = controlIdBuffer.length;
 
-                const fileControlBuffer = Buffer.alloc(HEADER_SIZE + controlFilenameLength);
+                const fileControlBuffer = Buffer.alloc(HEADER_SIZE + controlIdLength);
                 fileControlBuffer.writeUInt32BE(MAGIC_NUMBER, 0);
                 fileControlBuffer.writeUInt32BE(MessageType.FILE_CONTROL, 4);
-                fileControlBuffer.writeUInt32BE(controlFilenameLength, 8);
+                fileControlBuffer.writeUInt32BE(controlIdLength, 8);
                 fileControlBuffer.writeUInt32BE((message as FileControlMessage).controlType, 12);
-                controlFilenameBuffer.copy(fileControlBuffer, HEADER_SIZE);
+                // 填充额外的头部字节为0
+                fileControlBuffer.writeUInt32BE(0, 16);
+                fileControlBuffer.writeUInt32BE(0, 20);
+                fileControlBuffer.writeUInt32BE(0, 24);
+                fileControlBuffer.writeUInt32BE(0, 28);
+                controlIdBuffer.copy(fileControlBuffer, HEADER_SIZE);
                 return fileControlBuffer;
             }
             case MessageType.FILE_PAUSE: {
-                const pauseFilenameBuffer = Buffer.from((message as FilePauseMessage).filename, 'utf8');
-                const pauseFilenameLength = pauseFilenameBuffer.length;
+                const pauseIdBuffer = Buffer.from((message as FilePauseMessage).fileId, 'utf8');
+                const pauseIdLength = pauseIdBuffer.length;
 
-                const filePauseBuffer = Buffer.alloc(HEADER_SIZE + pauseFilenameLength);
+                const filePauseBuffer = Buffer.alloc(HEADER_SIZE + pauseIdLength);
                 filePauseBuffer.writeUInt32BE(MAGIC_NUMBER, 0);
                 filePauseBuffer.writeUInt32BE(MessageType.FILE_PAUSE, 4);
-                filePauseBuffer.writeUInt32BE(pauseFilenameLength, 8);
+                filePauseBuffer.writeUInt32BE(pauseIdLength, 8);
                 filePauseBuffer.writeUInt32BE(0, 12);
-                pauseFilenameBuffer.copy(filePauseBuffer, HEADER_SIZE);
+                // 填充额外的头部字节为0
+                filePauseBuffer.writeUInt32BE(0, 16);
+                filePauseBuffer.writeUInt32BE(0, 20);
+                filePauseBuffer.writeUInt32BE(0, 24);
+                filePauseBuffer.writeUInt32BE(0, 28);
+                pauseIdBuffer.copy(filePauseBuffer, HEADER_SIZE);
                 return filePauseBuffer;
             }
             case MessageType.FILE_RESUME: {
-                const resumeFilenameBuffer = Buffer.from((message as FileResumeMessage).filename, 'utf8');
-                const resumeFilenameLength = resumeFilenameBuffer.length;
+                const resumeIdBuffer = Buffer.from((message as FileResumeMessage).fileId, 'utf8');
+                const resumeIdLength = resumeIdBuffer.length;
 
-                const fileResumeBuffer = Buffer.alloc(HEADER_SIZE + resumeFilenameLength);
+                const fileResumeBuffer = Buffer.alloc(HEADER_SIZE + resumeIdLength);
                 fileResumeBuffer.writeUInt32BE(MAGIC_NUMBER, 0);
                 fileResumeBuffer.writeUInt32BE(MessageType.FILE_RESUME, 4);
-                fileResumeBuffer.writeUInt32BE(resumeFilenameLength, 8);
+                fileResumeBuffer.writeUInt32BE(resumeIdLength, 8);
                 fileResumeBuffer.writeUInt32BE(0, 12);
-                resumeFilenameBuffer.copy(fileResumeBuffer, HEADER_SIZE);
+                // 填充额外的头部字节为0
+                fileResumeBuffer.writeUInt32BE(0, 16);
+                fileResumeBuffer.writeUInt32BE(0, 20);
+                fileResumeBuffer.writeUInt32BE(0, 24);
+                fileResumeBuffer.writeUInt32BE(0, 28);
+                resumeIdBuffer.copy(fileResumeBuffer, HEADER_SIZE);
                 return fileResumeBuffer;
             }
             case MessageType.FILE_CANCEL: {
-                const cancelFilenameBuffer = Buffer.from((message as FileCancelMessage).filename, 'utf8');
-                const cancelFilenameLength = cancelFilenameBuffer.length;
+                const cancelIdBuffer = Buffer.from((message as FileCancelMessage).fileId, 'utf8');
+                const cancelIdLength = cancelIdBuffer.length;
 
-                const fileCancelBuffer = Buffer.alloc(HEADER_SIZE + cancelFilenameLength);
+                const fileCancelBuffer = Buffer.alloc(HEADER_SIZE + cancelIdLength);
                 fileCancelBuffer.writeUInt32BE(MAGIC_NUMBER, 0);
                 fileCancelBuffer.writeUInt32BE(MessageType.FILE_CANCEL, 4);
-                fileCancelBuffer.writeUInt32BE(cancelFilenameLength, 8);
+                fileCancelBuffer.writeUInt32BE(cancelIdLength, 8);
                 fileCancelBuffer.writeUInt32BE(0, 12);
-                cancelFilenameBuffer.copy(fileCancelBuffer, HEADER_SIZE);
+                // 填充额外的头部字节为0
+                fileCancelBuffer.writeUInt32BE(0, 16);
+                fileCancelBuffer.writeUInt32BE(0, 20);
+                fileCancelBuffer.writeUInt32BE(0, 24);
+                fileCancelBuffer.writeUInt32BE(0, 28);
+                cancelIdBuffer.copy(fileCancelBuffer, HEADER_SIZE);
                 return fileCancelBuffer;
             }
             default:
@@ -260,6 +324,10 @@ export class MessageCodec {
             throw new Error('Invalid magic number');
         }
 
+        if (buffer.length < HEADER_SIZE) {
+            throw new Error('Message header too short');
+        }
+        
         const messageType = buffer.readUInt32BE(4);
         const field1 = buffer.readUInt32BE(8);
         const field2 = buffer.readUInt32BE(12);
@@ -268,14 +336,27 @@ export class MessageCodec {
             case MessageType.FILE_START: {
                 const filenameLength = field1;
                 const fileSize = field2;
-                if (buffer.length < HEADER_SIZE + filenameLength) {
-                    throw new Error('Incomplete FILE_START message');
+                
+                // 读取fileId长度（在32字节头部的第16字节位置）
+                if (buffer.length < HEADER_SIZE) {
+                    throw new Error('Incomplete FILE_START message - header too short');
                 }
+                const fileIdLength = buffer.readUInt32BE(16);
+                
+                if (buffer.length < HEADER_SIZE + filenameLength + fileIdLength) {
+                    throw new Error('Incomplete FILE_START message - body too short');
+                }
+                
                 const filename = buffer.subarray(HEADER_SIZE, HEADER_SIZE + filenameLength).toString('utf8');
-                return { type: MessageType.FILE_START, filename, fileSize };
+                const fileId = buffer.subarray(HEADER_SIZE + filenameLength, HEADER_SIZE + filenameLength + fileIdLength).toString('utf8');
+                
+                return { type: MessageType.FILE_START, filename, fileSize, fileId };
             }
 
             case MessageType.FILE_START_ACK:
+                if (buffer.length < HEADER_SIZE) {
+                    throw new Error('Incomplete FILE_START_ACK message');
+                }
                 return { type: MessageType.FILE_START_ACK };
 
             case MessageType.FILE_CHUNK: {
@@ -289,77 +370,83 @@ export class MessageCodec {
             }
 
             case MessageType.FILE_CHUNK_ACK: {
+                if (buffer.length < HEADER_SIZE) {
+                    throw new Error('Incomplete FILE_CHUNK_ACK message');
+                }
                 const ackIndex = field1;
                 return { type: MessageType.FILE_CHUNK_ACK, ackIndex };
             }
 
             case MessageType.FILE_PAUSE_ACK: {
-                const pauseAckFilenameLength = field1;
-                if (buffer.length < HEADER_SIZE + pauseAckFilenameLength) {
+                const pauseAckIdLength = field1;
+                if (buffer.length < HEADER_SIZE + pauseAckIdLength) {
                     throw new Error('Incomplete FILE_PAUSE_ACK message');
                 }
-                const pauseAckFilename = buffer.subarray(HEADER_SIZE, HEADER_SIZE + pauseAckFilenameLength).toString('utf8');
-                return { type: MessageType.FILE_PAUSE_ACK, filename: pauseAckFilename };
+                const pauseAckId = buffer.subarray(HEADER_SIZE, HEADER_SIZE + pauseAckIdLength).toString('utf8');
+                return { type: MessageType.FILE_PAUSE_ACK, fileId: pauseAckId };
             }
 
             case MessageType.FILE_RESUME_ACK: {
-                const resumeAckFilenameLength = field1;
-                if (buffer.length < HEADER_SIZE + resumeAckFilenameLength) {
+                const resumeAckIdLength = field1;
+                if (buffer.length < HEADER_SIZE + resumeAckIdLength) {
                     throw new Error('Incomplete FILE_RESUME_ACK message');
                 }
-                const resumeAckFilename = buffer.subarray(HEADER_SIZE, HEADER_SIZE + resumeAckFilenameLength).toString('utf8');
-                return { type: MessageType.FILE_RESUME_ACK, filename: resumeAckFilename, lastChunkIndex: field2 };
+                const resumeAckId = buffer.subarray(HEADER_SIZE, HEADER_SIZE + resumeAckIdLength).toString('utf8');
+                return { type: MessageType.FILE_RESUME_ACK, fileId: resumeAckId, lastChunkIndex: field2 };
             }
 
             case MessageType.FILE_CANCEL_ACK: {
-                const cancelAckFilenameLength = field1;
-                if (buffer.length < HEADER_SIZE + cancelAckFilenameLength) {
+                const cancelAckIdLength = field1;
+                if (buffer.length < HEADER_SIZE + cancelAckIdLength) {
                     throw new Error('Incomplete FILE_CANCEL_ACK message');
                 }
-                const cancelAckFilename = buffer.subarray(HEADER_SIZE, HEADER_SIZE + cancelAckFilenameLength).toString('utf8');
+                const cancelAckId = buffer.subarray(HEADER_SIZE, HEADER_SIZE + cancelAckIdLength).toString('utf8');
                 const success = field2 === 1;
-                return { type: MessageType.FILE_CANCEL_ACK, filename: cancelAckFilename, success };
+                return { type: MessageType.FILE_CANCEL_ACK, fileId: cancelAckId, success };
             }
 
             case MessageType.FILE_CONTROL: {
-                const controlFilenameLength = field1;
+                const controlIdLength = field1;
                 const controlType = field2;
-                if (buffer.length < HEADER_SIZE + controlFilenameLength) {
+                if (buffer.length < HEADER_SIZE + controlIdLength) {
                     throw new Error('Incomplete FILE_CONTROL message');
                 }
-                const controlFilename = buffer.subarray(HEADER_SIZE, HEADER_SIZE + controlFilenameLength).toString('utf8');
-                return { type: MessageType.FILE_CONTROL, controlType, filename: controlFilename };
+                const controlId = buffer.subarray(HEADER_SIZE, HEADER_SIZE + controlIdLength).toString('utf8');
+                return { type: MessageType.FILE_CONTROL, controlType, fileId: controlId };
             }
          
 
             case MessageType.FILE_END:
+                if (buffer.length < HEADER_SIZE) {
+                    throw new Error('Incomplete FILE_END message');
+                }
                 return { type: MessageType.FILE_END };
 
             case MessageType.FILE_PAUSE: {
-                const pauseFilenameLength = field1;
-                if (buffer.length < HEADER_SIZE + pauseFilenameLength) {
+                const pauseIdLength = field1;
+                if (buffer.length < HEADER_SIZE + pauseIdLength) {
                     throw new Error('Incomplete FILE_PAUSE message');
                 }
-                const pauseFilename = buffer.subarray(HEADER_SIZE, HEADER_SIZE + pauseFilenameLength).toString('utf8');
-                return { type: MessageType.FILE_PAUSE, filename: pauseFilename };
+                const pauseId = buffer.subarray(HEADER_SIZE, HEADER_SIZE + pauseIdLength).toString('utf8');
+                return { type: MessageType.FILE_PAUSE, fileId: pauseId };
             }
 
             case MessageType.FILE_RESUME: {
-                const resumeFilenameLength = field1;
-                if (buffer.length < HEADER_SIZE + resumeFilenameLength) {
+                const resumeIdLength = field1;
+                if (buffer.length < HEADER_SIZE + resumeIdLength) {
                     throw new Error('Incomplete FILE_RESUME message');
                 }
-                const resumeFilename = buffer.subarray(HEADER_SIZE, HEADER_SIZE + resumeFilenameLength).toString('utf8');
-                return { type: MessageType.FILE_RESUME, filename: resumeFilename };
+                const resumeId = buffer.subarray(HEADER_SIZE, HEADER_SIZE + resumeIdLength).toString('utf8');
+                return { type: MessageType.FILE_RESUME, fileId: resumeId };
             }
 
             case MessageType.FILE_CANCEL: {
-                const cancelFilenameLength = field1;
-                if (buffer.length < HEADER_SIZE + cancelFilenameLength) {
+                const cancelIdLength = field1;
+                if (buffer.length < HEADER_SIZE + cancelIdLength) {
                     throw new Error('Incomplete FILE_CANCEL message');
                 }
-                const cancelFilename = buffer.subarray(HEADER_SIZE, HEADER_SIZE + cancelFilenameLength).toString('utf8');
-                return { type: MessageType.FILE_CANCEL, filename: cancelFilename };
+                const cancelId = buffer.subarray(HEADER_SIZE, HEADER_SIZE + cancelIdLength).toString('utf8');
+                return { type: MessageType.FILE_CANCEL, fileId: cancelId };
             }
 
             default:

@@ -102,6 +102,7 @@ const receivedFiles = ref<Array<{
   path: string
   progress: number
   clientId: string
+  fileId: string
   size: number
   status: 'complete' | 'in-progress' | 'error' | 'cancel' | 'paused'
   receiveRate: number // 添加接收速率
@@ -268,6 +269,7 @@ const handleFileTransferStatus = (data: ServerTransferStatus) => {
       progress: 0,
       size: data.filesize,
       clientId: data.clientId,
+      fileId: data.fileId,
       receiveRate: 0,
       status: 'in-progress',
       isCancel: false,
@@ -276,7 +278,7 @@ const handleFileTransferStatus = (data: ServerTransferStatus) => {
     })
   }
   else if (data.type === 'transfer-progress') {
-    const existingFileIndex = receivedFiles.value.findIndex((file: { name: string; clientId: string }) => file.name === data.filename && file.clientId === data.clientId)
+    const existingFileIndex = receivedFiles.value.findIndex((file: { fileId: string; clientId: string }) => file.fileId === data.fileId && file.clientId === data.clientId)
     if (existingFileIndex >= 0) {
       const fileToUpdate = receivedFiles.value[existingFileIndex]
       if (fileToUpdate) {
@@ -289,7 +291,7 @@ const handleFileTransferStatus = (data: ServerTransferStatus) => {
       }
     }
   } else if (data.type === 'transfer-complete') {
-    const existingFileIndex = receivedFiles.value.findIndex((file: { name: string; clientId: string }) => file.name === data.filename && file.clientId === data.clientId)
+    const existingFileIndex = receivedFiles.value.findIndex((file: { fileId: string; clientId: string }) => file.fileId === data.fileId && file.clientId === data.clientId)
     if (existingFileIndex >= 0) {
       const fileToUpdate = receivedFiles.value[existingFileIndex]
       if (fileToUpdate) {
@@ -303,7 +305,7 @@ const handleFileTransferStatus = (data: ServerTransferStatus) => {
     }
   } else if (data.type === 'transfer-pause') {
 
-    const existingFileIndex = receivedFiles.value.findIndex((file: { name: string; clientId: string }) => file.name === data.filename && file.clientId === data.clientId)
+    const existingFileIndex = receivedFiles.value.findIndex((file: { fileId: string; clientId: string }) => file.fileId === data.fileId && file.clientId === data.clientId)
     if (existingFileIndex >= 0) {
       const fileToUpdate = receivedFiles.value[existingFileIndex]
       if (fileToUpdate) {
@@ -312,7 +314,7 @@ const handleFileTransferStatus = (data: ServerTransferStatus) => {
       }
     }
   } else if (data.type === 'transfer-resume') {
-    const existingFileIndex = receivedFiles.value.findIndex((file: { name: string; clientId: string }) => file.name === data.filename && file.clientId === data.clientId)
+    const existingFileIndex = receivedFiles.value.findIndex((file: { fileId: string; clientId: string }) => file.fileId === data.fileId && file.clientId === data.clientId)
     if (existingFileIndex >= 0) {
       const fileToUpdate = receivedFiles.value[existingFileIndex]
       if (fileToUpdate) {
@@ -321,7 +323,7 @@ const handleFileTransferStatus = (data: ServerTransferStatus) => {
       }
     }
   } else if (data.type === 'transfer-cancel') {
-    const existingFileIndex = receivedFiles.value.findIndex((file: { name: string; clientId: string }) => file.name === data.filename && file.clientId === data.clientId)
+    const existingFileIndex = receivedFiles.value.findIndex((file: { fileId: string; clientId: string }) => file.fileId === data.fileId && file.clientId === data.clientId)
     if (existingFileIndex >= 0) {
       const fileToUpdate = receivedFiles.value[existingFileIndex]
       if (fileToUpdate) {
@@ -339,7 +341,7 @@ const handleFileTransferError = (error: { message: string }) => {
   // 添加错误通知
   connectionStatus.value.unshift({
     type: 'error',
-    message: `传输错误: ${error.message}`,
+    message: `t('receive.fileTransferError'): ${error.message}`,
     timestamp: Date.now()
   })
 }
@@ -606,6 +608,8 @@ onUnmounted(() => {
 /* 连接状态通知样式 */
 .connection-notifications {
   margin: 15px 0;
+  max-height: 100px;
+  overflow-y: auto;
 }
 
 .notification-item {

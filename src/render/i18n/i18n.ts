@@ -70,6 +70,13 @@ export const i18n = createI18n({
                 transferClosed:'传输已关闭',
                 transferCancelled:'传输取消',
                 transferError:'传输错误',
+                ready:'准备就绪',
+                complete:'完成',
+                inProgress:'进行中',
+                error:'错误',
+                paused:'已暂停',
+                unknown:'未知',
+                sendAll:'全部发送'
             },
             receive:{
                 title:'接收文件',
@@ -182,6 +189,13 @@ export const i18n = createI18n({
                 transferClosed:'Transfer Closed',
                 transferCancelled:'Transfer Cancelled',
                 transferError:'Transfer Error',
+                ready:'Ready',
+                complete:'Complete',
+                inProgress:'In Progress',
+                error:'Error',
+                paused:'Paused',
+                unknown:'Unknown',
+                sendAll:'Send All'
             },
             receive:{
                 title:'Receive File',
@@ -293,6 +307,13 @@ export const i18n = createI18n({
                 transferClosed:'転送閉じる',
                 transferCancelled:'転送キャンセル',
                 transferError:'転送エラー',
+                ready:'準備完了',
+                complete:'完了',
+                inProgress:'進行中',
+                error:'エラー',
+                paused:'一時停止',
+                unknown:'不明',
+                sendAll:'すべて送信'
             },
             receive:{
                 title:'ファイル受信',

@@ -4,74 +4,88 @@ export type ServerTransferStatus = {
     filename: string;
     filepath: string;
     filesize: number;
+    fileId: string;
     message: string;
 } | {
     type: 'transfer-progress',
     clientId: string;
-    filename: string;
+    fileId: string;
     progress: number;
     message: string;
     receiveRate: number; // 接收速率 (bytes/second)
 } | {
     type: 'transfer-complete',
     clientId: string;
-    filename: string;
+    fileId: string;
     message: string;
 } | {
     type: 'transfer-error',
     clientId: string;
-    filename: string;
+    fileId: string;
     message: string;
 } | {
     type: 'transfer-pause',
     clientId: string;
-    filename: string;
+    fileId: string;
     message: string;
 } | {
     type: 'transfer-resume',
     clientId: string;
-    filename: string;
+    fileId: string;
     message: string;
 } | {
     type: 'transfer-cancel',
     clientId: string;
-    filename: string;
+    fileId: string;
     message: string;
 } | {
     type: 'transfer-close';
     clientId: string;
-    filename: string;
+    fileId: string;
     message: string;
 }
 
 export type ClientTransferStatus = {
     type: 'transfer-start',
+    fileId: string;
+    filePath: string;
     message: string;
 } | {
     type: 'transfer-progress',
     message: string;
     progress: number;
+    fileId: string;
+    filePath: string;
     transferRate?: number;
 } | {
     type: 'transfer-complete',
+    fileId: string;
+    filePath: string;
     message: string;
 } | {
     type: 'transfer-error',
+    fileId: string;
+    filePath: string;
     message: string;
 } | {
     type: 'transfer-pause',
-    filename: string;
+    fileId: string;
+    filePath: string;
     message: string;
 } | {
     type: 'transfer-resume',
-    filename: string;
+    fileId: string;
+    filePath: string;
     message: string;
 } | {
     type: 'transfer-cancel',
-    filename: string;
+    fileId: string;
+    filePath: string;
     message: string;
 } | {
     type: 'transfer-close',
+    fileId: string;
+    filePath: string;   
     message:string;
 }
 

@@ -2,18 +2,36 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { createReadStream, statSync, createWriteStream, WriteStream, ReadStream, existsSync } from 'fs';
 import { join, basename, parse } from 'path';
 import { type ClientTransferStatus, type ServerTransferStatus } from '../common/types';
+
+// 文件传输状态枚举
+enum FileTransferStatus {
+    Pending = 'pending',      // 未传送
+    InProgress = 'inprogress', // 正在传送
+    Completed = 'completed'    // 已传送
+}
+
+// 文件队列项接口
+interface QueuedFile {
+    filePath: string;
+    fileId: string;
+    status: FileTransferStatus;
+}
 import EventEmitter from 'events';
-import { MessageCodec, MessageType, type FileStartMessage, type FileStartAckMessage, type FileChunkMessage, type FileChunkAckMessage, type FileEndMessage, type FilePauseMessage, type FilePauseAckMessage, type FileResumeMessage, type FileResumeAckMessage, type FileCancelMessage, type FileCancelAckMessage, type FileControlMessage,  type FileMessage } from '../common/MessageCodec';
+import { MessageCodec, MessageType, type FileStartMessage, type FileStartAckMessage, type FileChunkMessage, type FileChunkAckMessage, type FileEndMessage, type FilePauseMessage, type FilePauseAckMessage, type FileResumeMessage, type FileResumeAckMessage, type FileCancelMessage, type FileCancelAckMessage, type FileControlMessage, type FileMessage } from '../common/MessageCodec';
 import { randomUUID } from 'crypto';
 import { settings } from './settings';
+import type { IncomingMessage } from 'http';
 
-
+function generateClientId(): string {
+    return randomUUID();
+}
 
 
 interface FileInfos {
     filename: string;
     filepath: string;
     fileSize: number;
+    fileId: string;
     receivedChunks: number;
     bytesReceived: number;
     startTime: number; // 添加开始时间戳
@@ -52,15 +70,13 @@ export class FileTransferServer extends EventEmitter {
         this.onProgressCallbacks = callback;
     }
 
-    private createClientId(): string {
-        return randomUUID();
-    }
+
 
     private setupListeners() {
-        this.wss.on('connection', (ws: WebSocket) => {
-            console.log('New client connected');
+        this.wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+            console.log('New client connected', req.socket.remoteAddress, req.socket.remotePort);
             this.clients.add(ws);
-            this.clientIds.set(ws, this.createClientId());
+            this.clientIds.set(ws, generateClientId());
             ws.on('message', (data: WebSocket.Data) => {
                 this.handleMessage(ws, data);
             });
@@ -73,7 +89,7 @@ export class FileTransferServer extends EventEmitter {
                     this.onProgressCallbacks({
                         type: 'transfer-close',
                         clientId: this.clientIds.get(ws) || 'unknown',
-                        filename: fileInfo.filename,
+                        fileId: fileInfo.fileId,
                         message: '已断开连接',
                     })
                 }
@@ -87,7 +103,7 @@ export class FileTransferServer extends EventEmitter {
                     type: 'transfer-error',
                     message: `连接错误: ${error.message || '未知错误'}`,
                     clientId: this.clientIds.get(ws) || 'unknown',
-                    filename: ''
+                    fileId: ''
                 });
                 // 清理资源
                 this.cleanupClientResources(ws);
@@ -197,6 +213,7 @@ export class FileTransferServer extends EventEmitter {
             filename: message.filename,
             filepath: filePath,
             fileSize: message.fileSize,
+            fileId: message.fileId,
             receivedChunks: 0,
             bytesReceived: 0,
             startTime: Date.now(),
@@ -207,10 +224,9 @@ export class FileTransferServer extends EventEmitter {
         });
 
         console.log(`File stream created for ${message.filename}`);
-
         // 发送确认消息
         const ackMessage: FileStartAckMessage = { type: MessageType.FILE_START_ACK };
-        this.onProgressCallbacks({ type: 'transfer-start', clientId: this.clientIds.get(ws) || 'unknown', filename: message.filename, filepath: filePath, filesize: message.fileSize, message: '' });
+        this.onProgressCallbacks({ type: 'transfer-start', clientId: this.clientIds.get(ws) || 'unknown', fileId: message.fileId, filename: message.filename, filepath: filePath, filesize: message.fileSize, message: '' });
         ws.send(this.encodeMessage(ackMessage));
     }
 
@@ -255,7 +271,7 @@ export class FileTransferServer extends EventEmitter {
                     type: 'transfer-error',
                     message: `写入文件块失败: ${err.message || '未知错误'}`,
                     clientId: this.clientIds.get(ws) || 'unknown',
-                    filename: fileInfo.filename
+                    fileId: fileInfo.fileId
                 });
             } else {
                 console.log(`Written chunk ${message.chunkIndex} (${message.chunkData.length} bytes) to file`);
@@ -286,7 +302,7 @@ export class FileTransferServer extends EventEmitter {
                     this.onProgressCallbacks({
                         type: 'transfer-progress',
                         clientId: this.clientIds.get(ws) || 'unknown',
-                        filename: fileInfo.filename,
+                        fileId: fileInfo.fileId,
                         progress,
                         message: '',
                         receiveRate: fileInfo.receiveRate // 添加接收速率
@@ -308,7 +324,7 @@ export class FileTransferServer extends EventEmitter {
 
                     // 发送100%进度完成
                     this.onProgressCallbacks(
-                        { type: 'transfer-complete', clientId: this.clientIds.get(ws) || 'unknown', filename: fileInfo.filename, message: '' }
+                        { type: 'transfer-complete', clientId: this.clientIds.get(ws) || 'unknown', fileId: fileInfo.fileId, message: '' }
                     );
                 }
                 // 删除文件信息
@@ -320,7 +336,7 @@ export class FileTransferServer extends EventEmitter {
 
     // 处理文件暂停消息
     private handleFilePause(ws: WebSocket, message: FilePauseMessage) {
-        console.log(`Received pause request for file: ${message.filename}`);
+        console.log(`Received pause request for file: ${message.fileId}`);
 
         // 获取文件信息
         const fileInfo = this.fileInfos.get(ws);
@@ -329,7 +345,7 @@ export class FileTransferServer extends EventEmitter {
             // 发送暂停确认消息（失败）
             const ackMessage: FilePauseAckMessage = {
                 type: MessageType.FILE_PAUSE_ACK,
-                filename: message.filename,
+                fileId: message.fileId,
                 success: false
             };
             ws.send(this.encodeMessage(ackMessage));
@@ -337,12 +353,12 @@ export class FileTransferServer extends EventEmitter {
         }
 
         // 检查文件名是否匹配
-        if (fileInfo.filename !== message.filename) {
+        if (fileInfo.fileId !== message.fileId) {
             console.error('Filename mismatch for pause request');
             // 发送暂停确认消息（失败）
             const ackMessage: FilePauseAckMessage = {
                 type: MessageType.FILE_PAUSE_ACK,
-                filename: message.filename,
+                fileId: message.fileId,
                 success: false
             };
             ws.send(this.encodeMessage(ackMessage));
@@ -356,7 +372,7 @@ export class FileTransferServer extends EventEmitter {
         // 发送暂停确认消息
         const ackMessage: FilePauseAckMessage = {
             type: MessageType.FILE_PAUSE_ACK,
-            filename: message.filename,
+            fileId: message.fileId,
             success: true
         };
         ws.send(this.encodeMessage(ackMessage));
@@ -365,7 +381,7 @@ export class FileTransferServer extends EventEmitter {
         this.onProgressCallbacks({
             type: 'transfer-pause',
             clientId: this.clientIds.get(ws) || 'unknown',
-            filename: fileInfo.filename,
+            fileId: fileInfo.fileId,
             message: '传输已暂停'
         });
     }
@@ -373,7 +389,7 @@ export class FileTransferServer extends EventEmitter {
 
     // 处理文件恢复消息
     private handleFileResume(ws: WebSocket, message: FileResumeMessage) {
-        console.log(`Received resume request for file: ${message.filename}`);
+        console.log(`Received resume request for file: ${message.fileId}`);
 
         // 获取文件信息
         const fileInfo = this.fileInfos.get(ws);
@@ -382,7 +398,7 @@ export class FileTransferServer extends EventEmitter {
             // 发送恢复确认消息（失败）
             const ackMessage: FileResumeAckMessage = {
                 type: MessageType.FILE_RESUME_ACK,
-                filename: message.filename,
+                fileId: message.fileId,
                 success: false,
                 lastChunkIndex: -1
             };
@@ -391,12 +407,12 @@ export class FileTransferServer extends EventEmitter {
         }
 
         // 检查文件名是否匹配
-        if (fileInfo.filename !== message.filename) {
+        if (fileInfo.fileId !== message.fileId) {
             console.error('Filename mismatch for resume request');
             // 发送恢复确认消息（失败）
             const ackMessage: FileResumeAckMessage = {
                 type: MessageType.FILE_RESUME_ACK,
-                filename: message.filename,
+                fileId: message.fileId,
                 success: false,
                 lastChunkIndex: -1
             };
@@ -411,7 +427,7 @@ export class FileTransferServer extends EventEmitter {
         // 发送恢复确认消息，包含最后一个块索引
         const ackMessage: FileResumeAckMessage = {
             type: MessageType.FILE_RESUME_ACK,
-            filename: message.filename,
+            fileId: message.fileId,
             success: true,
             lastChunkIndex: fileInfo.lastChunkIndex
         };
@@ -421,7 +437,7 @@ export class FileTransferServer extends EventEmitter {
         this.onProgressCallbacks({
             type: 'transfer-resume',
             clientId: this.clientIds.get(ws) || 'unknown',
-            filename: fileInfo.filename,
+            fileId: fileInfo.fileId,
             message: '传输已恢复'
 
         })
@@ -429,7 +445,7 @@ export class FileTransferServer extends EventEmitter {
 
     // 处理文件取消消息
     private handleFileCancel(ws: WebSocket, message: FileCancelMessage) {
-        console.log(`Received cancel request for file: ${message.filename}`);
+        console.log(`Received cancel request for file: ${message.fileId}`);
 
         // 获取文件信息
         const fileInfo = this.fileInfos.get(ws);
@@ -438,7 +454,7 @@ export class FileTransferServer extends EventEmitter {
             // 发送取消确认消息（失败）
             const ackMessage: FileCancelAckMessage = {
                 type: MessageType.FILE_CANCEL_ACK,
-                filename: message.filename,
+                fileId: message.fileId,
                 success: false
             };
             ws.send(this.encodeMessage(ackMessage));
@@ -446,12 +462,12 @@ export class FileTransferServer extends EventEmitter {
         }
 
         // 检查文件名是否匹配
-        if (fileInfo.filename !== message.filename) {
+        if (fileInfo.fileId !== message.fileId) {
             console.error('Filename mismatch for cancel request');
             // 发送取消确认消息（失败）
             const ackMessage: FileCancelAckMessage = {
                 type: MessageType.FILE_CANCEL_ACK,
-                filename: message.filename,
+                fileId: message.fileId ,
                 success: false
             };
             ws.send(this.encodeMessage(ackMessage));
@@ -471,8 +487,8 @@ export class FileTransferServer extends EventEmitter {
         // 发送取消确认消息（成功）
         const ackMessage: FileCancelAckMessage = {
             type: MessageType.FILE_CANCEL_ACK,
-            filename: message.filename,
-            success: true
+            fileId: message.fileId,
+            success: true   
         };
         ws.send(this.encodeMessage(ackMessage));
 
@@ -480,7 +496,7 @@ export class FileTransferServer extends EventEmitter {
         this.onProgressCallbacks({
             type: 'transfer-cancel',
             clientId: this.clientIds.get(ws) || 'unknown',
-            filename: fileInfo.filename,
+            fileId: fileInfo.fileId,
             message: '传输已取消'
         });
     }
@@ -507,7 +523,7 @@ export class FileTransferServer extends EventEmitter {
                 const controlMsg: FileControlMessage = {
                     type: MessageType.FILE_CONTROL,
                     controlType: controlType,
-                    filename: filename
+                    fileId: fileInfo.fileId
                 };
                 console.log(`Sending control message ${controlType} for file ${filename} to client ${clientId}`);
                 ws.send(this.encodeMessage(controlMsg));
@@ -574,16 +590,20 @@ export class FileTransferClient {
     private isCancelled: boolean = false; // 添加取消状态
     private lastChunkIndex: number = -1; // 添加最后一个块索引
     private fileStream: ReadStream | null = null; // 文件流引用
-    private activeFilePath: string | null = null; // 正在传输的本地文件路径
+    private activeFileId: string | null = null; // 正在传输的本地文件ID
     private sendingInProgress: boolean = false; // 标记是否正在发送中
 
+    // 多文件传输相关属性
+    private fileQueue: QueuedFile[] = []; // 文件传输队列
+    private isProcessingQueue: boolean = false; // 是否正在处理队列
 
     constructor(url: string) {
         this.url = url;
         this.onProgressCallbacks = () => {
         };
+        this.fileQueue = [];
+        this.isProcessingQueue = false;
     }
-
     public setProgressCallback(callback: (status: ClientTransferStatus) => void) {
         this.onProgressCallbacks = callback;
     }
@@ -607,7 +627,9 @@ export class FileTransferClient {
                 if (this.onProgressCallbacks) {
                     this.onProgressCallbacks({
                         type: 'transfer-error',
-                        message: `连接错误: ${error.message || '未知错误'}`
+                        fileId: '',
+                        filePath: '',
+                        message: '连接错误: ' + (error.message || '未知错误')
                     });
                 }
                 // 清理资源
@@ -621,7 +643,9 @@ export class FileTransferClient {
                 if (this.onProgressCallbacks) {
                     this.onProgressCallbacks({
                         type: 'transfer-close',
-                        message: '与文件传输服务器的连接已断开'
+                        message: '与文件传输服务器的连接已断开',
+                        fileId: '',
+                        filePath: ''
                     });
                 }
                 // 清理资源
@@ -629,15 +653,8 @@ export class FileTransferClient {
                 // 如果正在发送文件，需要清理相关资源
                 if (this.sendingInProgress) {
                     this.sendingInProgress = false;
-                    this.activeFilePath = null;
-                    if (this.fileStream) {
-                        try {
-                            this.fileStream.destroy();
-                        } catch (e) {
-                            // ignore
-                        }
-                        this.fileStream = null;
-                    }
+                    this.activeFileId = null;
+                    this.disconnect();
                 }
             });
         });
@@ -673,7 +690,9 @@ export class FileTransferClient {
                 console.log('Received FILE_START_ACK');
                 this.onProgressCallbacks({
                     type: 'transfer-start',
-                    message: `Starting to send file: ${this.activeFilePath || ''}`
+                    message: `Starting to send file: ${this.getfilePathFromId(this.activeFileId) || '' }`,
+                    fileId: this.activeFileId || '',
+                    filePath: this.getfilePathFromId(this.activeFileId ) || ''
                 });
                 this.receivedFileStartAck = true;
                 if (this.fileStartAckResolver) {
@@ -700,10 +719,12 @@ export class FileTransferClient {
                 // 发送循环将退出；标记发送不在进行
 
                 this.sendingInProgress = false;
+                let fileId = (message as FilePauseAckMessage).fileId;
                 this.onProgressCallbacks({
                     type: 'transfer-pause',
                     message: '传输已暂停',
-                    filename: (message as FilePauseAckMessage).filename
+                    fileId,
+                    filePath: (this.getfilePathFromId((message as FilePauseAckMessage).fileId)) || ''
                 });
                 break;
             case MessageType.FILE_RESUME_ACK:
@@ -712,14 +733,18 @@ export class FileTransferClient {
                 this.lastChunkIndex = (message as FileResumeAckMessage).lastChunkIndex;
                 this.isPaused = false;
                 // 如果存在活动文件路径且当前没有正在发送，则从 lastChunkIndex+1 处继续发送
-                if (this.activeFilePath && !this.sendingInProgress) {
+                if (this.activeFileId !== null && !this.sendingInProgress) {
                     // 异步恢复发送，不阻塞消息处理
-                    this.sendFileFromOffset(this.activeFilePath, this.lastChunkIndex + 1).catch(err => {
+                    let file = {'filePath': this.getfilePathFromId(this.activeFileId) as string, 'fileId': this.activeFileId}
+                    this.sendFileFromOffset(file, this.lastChunkIndex + 1).catch(err => {
                         console.error('Error while resuming transfer:', err);
                         // 发送错误信息
                         this.onProgressCallbacks({
                             type: 'transfer-error',
-                            message: `恢复传输失败: ${err.message || '未知错误'}`
+                            message: `恢复传输失败: ${err.message || '未知错误'}`,
+                            fileId: this.activeFileId || '',
+                            filePath: this.getfilePathFromId(this.activeFileId) || ''
+                            
                         });
                     });
                 }
@@ -727,7 +752,8 @@ export class FileTransferClient {
                 this.onProgressCallbacks({
                     type: 'transfer-resume',
                     message: '传输已恢复',
-                    filename: (message as FileResumeAckMessage).filename
+                    fileId: (message as FileResumeAckMessage).fileId,
+                    filePath: (this.getfilePathFromId((message as FileResumeAckMessage).fileId)) || ''
                 });
                 break;
             case MessageType.FILE_CANCEL_ACK:
@@ -737,7 +763,8 @@ export class FileTransferClient {
                 this.onProgressCallbacks({
                     type: 'transfer-cancel',
                     message: '传输已取消',
-                    filename: (message as FileCancelAckMessage).filename
+                    fileId: (message as FileCancelAckMessage).fileId,
+                    filePath: (this.getfilePathFromId((message as FileCancelAckMessage).fileId)) || ''
                 });
                 break;
             case MessageType.FILE_CONTROL:
@@ -745,13 +772,13 @@ export class FileTransferClient {
                 // 根据控制类型执行相应的操作
                 switch ((message as FileControlMessage).controlType) {
                     case MessageType.FILE_PAUSE:
-                        this.pauseTransfer((message as FileControlMessage).filename);
+                        this.pauseTransfer((message as FileControlMessage).fileId);
                         break;
                     case MessageType.FILE_RESUME:
-                        this.resumeTransfer((message as FileControlMessage).filename);
+                        this.resumeTransfer((message as FileControlMessage).fileId);
                         break;
                     case MessageType.FILE_CANCEL:
-                        this.cancelTransfer((message as FileControlMessage).filename);
+                        this.cancelTransfer((message as FileControlMessage).fileId);
                         break;
                 }
                 break;
@@ -785,11 +812,52 @@ export class FileTransferClient {
         }
     }
 
-    public async sendFile(filePath: string): Promise<void> {
-        // 从头开始发送文件（chunkIndex = 0）
-        return this.sendFileFromOffset(filePath, 0);
+    public async sendFile(files: { filePath: string; fileId: string }[]): Promise<void> {
+        // 将文件添加到传输队列，并设置初始状态为待处理
+        this.fileQueue = files.map(file => ({
+            ...file,
+            status: FileTransferStatus.Pending
+        }));
+
+        // 如果没有正在处理队列，则开始处理
+        if (!this.isProcessingQueue) {
+            this.isProcessingQueue = true;
+            await this.processFileQueue();
+        }
     }
 
+    // 处理文件传输队列
+    private async processFileQueue(): Promise<void> {
+        for (const queuedFile of this.fileQueue) {
+            // 只处理未完成的文件
+            if (queuedFile.status !== FileTransferStatus.Completed) {
+                // 更新状态为正在传输
+                queuedFile.status = FileTransferStatus.InProgress;
+                
+                try {
+                    // 从头开始发送文件（chunkIndex = 0）
+                    await this.sendFileFromOffset({filePath: queuedFile.filePath, fileId: queuedFile.fileId}, 0);
+                    
+                    // 传输成功后更新状态为已完成
+                    queuedFile.status = FileTransferStatus.Completed;
+                } catch (error: unknown) {
+                    console.error(`Failed to send file ${queuedFile.filePath}:`, error);
+                    // 发送错误信息
+                    if (this.onProgressCallbacks) {
+                        this.onProgressCallbacks({
+                            type: 'transfer-error',
+                            filePath: queuedFile.filePath,
+                            fileId: queuedFile.fileId,
+                            message: `文件传输失败: ${(error as any).message || '未知错误'}`,
+                        });
+                    }
+                }
+            }
+        }
+
+        // 队列处理完成
+        this.isProcessingQueue = false;
+    }
     // 辅助函数：检查WebSocket连接状态并清理资源
     private checkWebSocketConnection(fileStream: ReadStream, onWsClose: () => void, onStreamError: (err: any) => void, onStreamClose: () => void): boolean {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
@@ -798,7 +866,7 @@ export class FileTransferClient {
             try { fileStream.destroy(); } catch (e) { }
             this.clearTimeouts();
             this.sendingInProgress = false;
-            this.activeFilePath = null;
+            this.activeFileId = null;
 
             // 移除事件监听器
             if (this.ws) {
@@ -820,7 +888,7 @@ export class FileTransferClient {
             console.log('File transfer cancelled');
             // 清理发送状态
             this.sendingInProgress = false;
-            this.activeFilePath = null;
+            this.activeFileId = null;
             this.clearTimeouts();
             // 确保流已关闭
             try { fileStream.destroy(); } catch (e) { }
@@ -845,18 +913,18 @@ export class FileTransferClient {
         return false; // 传输未被取消或暂停
     }
 
-    public async sendFileFromOffset(filePath: string, startChunkIndex: number): Promise<void> {
+    public async sendFileFromOffset(file:{filePath:string,fileId:string} ,startChunkIndex: number): Promise<void> {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             throw new Error('WebSocket is not connected');
         }
-
+        let { filePath, fileId } = file;
         const filename = basename(filePath);
         const fileSize = statSync(filePath).size;
 
         console.log(`Sending file: ${filename} (${fileSize} bytes) from chunk index ${startChunkIndex}`);
 
         // 记录正在传输的文件路径，供 resume 使用
-        this.activeFilePath = filePath;
+        this.activeFileId = fileId;
         this.sendingInProgress = true;
 
         // 初始化传输统计信息
@@ -875,6 +943,7 @@ export class FileTransferClient {
             const fileStartMsg: FileStartMessage = {
                 type: MessageType.FILE_START,
                 filename: filename,
+                fileId: fileId,
                 fileSize: fileSize
             };
 
@@ -897,7 +966,9 @@ export class FileTransferClient {
                         if (this.onProgressCallbacks) {
                             this.onProgressCallbacks({
                                 type: 'transfer-error',
-                                message: '等待文件开始确认超时'
+                                message: '等待文件开始确认超时',
+                                fileId,
+                                filePath,
                             });
                         }
                     }
@@ -949,7 +1020,9 @@ export class FileTransferClient {
             if (this.onProgressCallbacks) {
                 this.onProgressCallbacks({
                     type: 'transfer-error',
-                    message: `文件读取错误: ${err.message || '未知错误'}`
+                    message: `文件读取错误: ${err.message || '未知错误'}`,
+                    fileId,
+                    filePath,
                 });
             }
         };
@@ -972,7 +1045,7 @@ export class FileTransferClient {
             }
             this.clearTimeouts();
             this.sendingInProgress = false;
-            this.activeFilePath = null;
+            this.activeFileId = null;
         };
 
         if (this.ws) {
@@ -1063,6 +1136,8 @@ export class FileTransferClient {
                         progress: progress,
                         transferRate: this.transferRate,
                         message: '',
+                        fileId,
+                        filePath,
                     });
                 }
 
@@ -1093,7 +1168,9 @@ export class FileTransferClient {
             if (this.onProgressCallbacks) {
                 this.onProgressCallbacks({
                     type: 'transfer-error',
-                    message: `文件传输错误: ${err.message || '未知错误'}`
+                    message: `文件传输错误: ${err.message || '未知错误'}`,
+                    fileId,
+                    filePath,
                 });
             }
 
@@ -1101,7 +1178,7 @@ export class FileTransferClient {
             try { fileStream.destroy(); } catch (e) { }
             this.clearTimeouts();
             this.sendingInProgress = false;
-            this.activeFilePath = null;
+            this.activeFileId = null;
 
             // 移除事件监听器
             if (this.ws) {
@@ -1127,7 +1204,7 @@ export class FileTransferClient {
 
             // activeFilePath 保留以便 resume 使用（若取消则清理）
             if (this.isCancelled) {
-                this.activeFilePath = null;
+                this.activeFileId = null; 
                 this.clearTimeouts();
             }
             try {
@@ -1159,71 +1236,107 @@ export class FileTransferClient {
         if (this.onProgressCallbacks) {
             this.onProgressCallbacks({
                 type: 'transfer-complete',
-                message: '传输完成'
+                message: '传输完成',
+                fileId,
+                filePath,
             });
         }
 
         console.log('File transfer completed');
+        
+        // 更新队列中对应文件的状态为已完成
+        const queuedFile = this.fileQueue.find(f => f.fileId === fileId);
+        if (queuedFile) {
+            queuedFile.status = FileTransferStatus.Completed;
+        }
+        
         this.sendingInProgress = false;
-        this.activeFilePath = null;
+        this.activeFileId = null;
         try {
             fileStream.off('error', onStreamError);
             fileStream.off('close', onStreamClose);
         } catch (e) { }
+
+        // 如果还有文件在队列中，继续处理下一个文件
+        if (this.fileQueue.length > 0) {
+            // 不在这里直接调用processFileQueue，而是在下一次事件循环中调用
+            // 这样可以确保当前函数完全结束后再处理下一个文件
+            setImmediate(() => {
+                if (!this.isProcessingQueue) {
+                    this.isProcessingQueue = true;
+                    this.processFileQueue().catch(err => {
+                        console.error('Error processing file queue:', err);
+                    });
+                }
+            });
+        }
+    }    
+
+    // 批量添加文件到传输队列
+    public async sendFiles(files: { filePath: string; fileId: string }[]): Promise<void> {
+        // 将所有文件添加到传输队列，并设置初始状态为待处理
+        this.fileQueue = files.map(file => ({
+            ...file,
+            status: FileTransferStatus.Pending
+        }));
+
+        // 如果没有正在处理队列，则开始处理
+        if (!this.isProcessingQueue && this.fileQueue.length > 0) {
+            this.isProcessingQueue = true;
+            await this.processFileQueue();
+        }
     }
 
-    // 添加一个新的方法，用于处理从指定位置恢复传输
-    public async resumeTransferFromLastChunk(filePath: string, lastChunkIndex: number): Promise<void> {
-        // 从指定的块索引开始发送文件
-        return this.sendFileFromOffset(filePath, lastChunkIndex + 1);
+    // 清空传输队列
+    public clearFileQueue(): void {
+        this.fileQueue = [];
     }
 
+    // 获取队列中的文件数量
+    public getFileQueueLength(): number {
+        return this.fileQueue.length;
+    }
+    
+    // 获取队列中特定状态的文件数量
+    public getFileQueueLengthByStatus(status: FileTransferStatus): number {
+        return this.fileQueue.filter(file => file.status === status).length;
+    }
+    
+    // 获取队列中特定状态的文件列表
+    public getFilesByStatus(status: FileTransferStatus): QueuedFile[] {
+        return this.fileQueue.filter(file => file.status === status);
+    }
+    
     // 添加暂停传输方法
-    public pauseTransfer(filename: string): void {
+    public pauseTransfer(fileId: string): void {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             throw new Error('WebSocket is not connected');
         }
 
         const pauseMsg: FilePauseMessage = {
             type: MessageType.FILE_PAUSE,
-            filename: filename
+            fileId
         };
         this.ws.send(this.encodeMessage(pauseMsg));
     }
 
     // 添加恢复传输方法
-    public resumeTransfer(filename: string): void {
+    public resumeTransfer(fileId: string): void {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             throw new Error('WebSocket is not connected');
         }
 
         const resumeMsg: FileResumeMessage = {
             type: MessageType.FILE_RESUME,
-            filename: filename
+            fileId
         };
         this.ws.send(this.encodeMessage(resumeMsg));
     }
 
-    // 添加恢复传输并从指定位置开始的方法
-    public resumeTransferFrom(filename: string, lastChunkIndex: number): void {
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            throw new Error('WebSocket is not connected');
-        }
-
-        // 设置客户端状态
-        this.lastChunkIndex = lastChunkIndex;
-        this.isPaused = false;
-
-        // 发送恢复消息
-        const resumeMsg: FileResumeMessage = {
-            type: MessageType.FILE_RESUME,
-            filename: filename
-        };
-        this.ws.send(this.encodeMessage(resumeMsg));
-    }
+ 
 
     // 添加取消传输方法
-    public cancelTransfer(filename: string): void {
+    public cancelTransfer(fileId: string): void {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             throw new Error('WebSocket is not connected');
         }
@@ -1238,14 +1351,13 @@ export class FileTransferClient {
             } catch (e) {
                 // ignore
             }
-            this.fileStream = null;
         }
 
         this.clearTimeouts();
 
         const cancelMsg: FileCancelMessage = {
             type: MessageType.FILE_CANCEL,
-            filename: filename
+            fileId
         };
         this.ws.send(this.encodeMessage(cancelMsg));
     }
@@ -1296,10 +1408,21 @@ export class FileTransferClient {
 
         // 清理所有待确认的块和超时定时器
         this.clearTimeouts();
+        this.onProgressCallbacks = () => {
+        };
 
         // 重置状态
         this.sendingInProgress = false;
-        this.activeFilePath = null;
+        this.activeFileId = null;
+
+        // 将队列中正在进行的文件状态改回待处理
+        this.fileQueue.forEach(file => {
+            if (file.status === FileTransferStatus.InProgress) {
+                file.status = FileTransferStatus.Pending;
+            }
+        });
+        
+        this.isProcessingQueue = false;
 
         if (this.ws) {
             try {
@@ -1312,5 +1435,12 @@ export class FileTransferClient {
         }
 
         console.log('Client disconnected');
+    }
+
+
+    getfilePathFromId(fileId: string | null): string | null {
+        if(fileId === null || fileId === undefined) return null;
+        const queuedFile = this.fileQueue.find(file => file.fileId === fileId);
+        return queuedFile?.filePath || null;
     }
 }

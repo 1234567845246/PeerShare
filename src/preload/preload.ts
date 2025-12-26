@@ -11,7 +11,7 @@ export interface ElectronAPI {
   disconnectFileClient: () => Promise<{ success: boolean; message: string }>;
   
   // 文件发送
-  sendFile: (filePath: string) => Promise<void>;
+  sendFile: (files: { filePath: string; fileId: string }[]) => Promise<void>;
   
   // 文件传输控制（从发送端发起）
   pauseFileTransfer: (filename: string) => Promise<{ success: boolean; message: string }>;
@@ -62,7 +62,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   disconnectFileClient: () => ipcRenderer.invoke('disconnect-file-client'),
   
   // 文件发送
-  sendFile: (filePath: string) => ipcRenderer.invoke('send-file', filePath),
+  sendFile: (files:{filePath: string,fileId:string}[]) => ipcRenderer.invoke('send-file',files ),
   
   // 文件传输控制（从发送端发起）
   pauseFileTransfer: (filename: string) => ipcRenderer.invoke('pause-file-transfer', filename),
