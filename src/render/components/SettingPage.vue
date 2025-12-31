@@ -100,9 +100,9 @@ const pickDirectory = async () => {
 
     try {
         if (window.electronAPI && window.electronAPI.chooseDirectory) {
-            const dir = await window.electronAPI.chooseDirectory(t('setting.choosedir'))
-            if (dir) {
-                setting.defaultDownloadPath = dir
+            const dir = await window.electronAPI.chooseDirectory(t('setting.choosedir'), false)
+            if (dir !== null && dir.length > 0) {
+                setting.defaultDownloadPath = dir[0] as string
             }
         } else {
             statusMessage.value = t('setting.couldNotOpenDirectoryDialog')

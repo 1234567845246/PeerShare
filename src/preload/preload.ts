@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer ,webUtils} from 'electron';
-import {type ServerTransferStatus,type ClientTransferStatus , type AppSettings} from '../common/types';
+import {type ServerTransferStatus,type ClientTransferStatus , type AppSettings,type FileStats} from '../common/types';
 
 export interface ElectronAPI {
   // 文件传输服务器控制
@@ -11,7 +11,7 @@ export interface ElectronAPI {
   disconnectFileClient: () => Promise<{ success: boolean; message: string }>;
   
   // 文件发送
-  sendFile: (files: { filePath: string; fileId: string }[]) => Promise<void>;
+  sendFile: (files: { filePath: string,fileId: string ,type:'file'|'directory'}[]) => Promise<void>;
   
   // 文件传输控制（从发送端发起）
   pauseFileTransfer: (filename: string) => Promise<{ success: boolean; message: string }>;
@@ -49,7 +49,8 @@ export interface ElectronAPI {
   getSettings: () => Promise<AppSettings>;
   saveSettings: (settings: AppSettings) => Promise<{ success: boolean; message: string }>;
   getdefaultSettings: () =>Promise<AppSettings>;
-  chooseDirectory: (title: string) => Promise<string | null>;
+  chooseDirectory: (title: string, multiple: boolean) => Promise<string[] | null>;
+  getPathStat: (path: string | string[]) => Promise<FileStats | FileStats[]>;
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -102,5 +103,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings: AppSettings) => ipcRenderer.invoke('save-settings', settings),
   getdefaultSettings: () => ipcRenderer.invoke('get-default-settings'),
-  chooseDirectory: (title: string) => ipcRenderer.invoke('choose-directory', title),
+  chooseDirectory: (title: string, multiple: boolean = false) => ipcRenderer.invoke('choose-directory', title, multiple),
+  getPathStat: (path: string | string[]) => ipcRenderer.invoke('get-path-stat', path),
+  
 } as ElectronAPI);

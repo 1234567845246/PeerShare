@@ -28,13 +28,12 @@
       </div>
 
       <div class="send-section">
-        <div class="file-selector" :class="{ active: isFileSelected }" @click="selectFile" @drop="handleFileDrop"
-          @dragover="handleFileDragOver">
+        <div class="file-selector" :class="{ active: isFileSelected }" @click.stop="selectFile"
+          @drop.prevent.stop="handleFileDrop" @dragover="handleFileDragOver">
           <div class="file-icon">
             <i class="fas fa-cloud-upload-alt"></i>
           </div>
-          <p class="file-selector-text">{{ $t('send.clickOrDrop') }}</p>
-          <button class="browse-btn">{{ $t('send.browse') }}</button>
+          <p class="file-selector-text">{{ $t('send.clickOrDrop') }}{{ $t('or') }}<span @click.stop="selectFile">{{ $t('send.uploadfile') }}</span>{{ $t('or') }}<span @click.stop="handleDirectorySelect">{{ $t('send.uploaddire') }}</span></p>
           <input type="file" ref="fileInput" @change="handleFileSelect" style="display: none;" multiple>
         </div>
 
@@ -44,14 +43,12 @@
             <div class="transfer-header">
               <div class="transfer-file">
                 <div class="transfer-icon">
-                  <i class="fas fa-file"></i>
+                  <i v-if="file.type === 'file'" class="fas fa-file"></i>
+                  <i v-else class="fas fa-folder"></i>
                 </div>
                 <div>
-                  <div class="transfer-name">
+                  <div class="transfer-name" :title="file.path" @click="openFileExplorer(file.path)">
                     {{ file.name }}
-                    <button class="muted-btn" @click="openFileExplorer(file.path)">
-                      <i class="fas fa-folder-open"></i>
-                    </button>
                   </div>
                   <div class="transfer-size-rate">
                     <div class="transfer-size">{{ formatFileSize(file.size) }}</div>
@@ -100,7 +97,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { formatFileSize, formatRate } from '../../common/tools'
-import type { ClientTransferStatus } from '../../common/types'
+import type { ClientTransferStatus, FileStats } from '../../common/types'
 import { useAppSettings } from '../setting/setting'
 import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
@@ -113,6 +110,7 @@ const sendFiles = ref<Array<{
   name: string
   path: string
   progress: number
+  type: 'file' | 'directory'
   size: number
   processmessage: string
   status: 'ready' | 'in-progress' | 'complete' | 'error' | 'paused' | 'cancel'
@@ -153,6 +151,37 @@ const selectFile = () => {
   }
 }
 
+
+// 处理目录选择
+const handleDirectorySelect = async () => {
+  const directoryHandle = await window.electronAPI.chooseDirectory('Select Directory', true);
+  if (directoryHandle !== null && directoryHandle.length > 0) {
+    for (let i = 0; i < directoryHandle.length; i++) {
+      const dire = directoryHandle[i];
+      const direPath = await window.electronAPI.getPathStat(dire as string) as FileStats[];
+      for (let j = 0; j < direPath.length; j++) {
+        const file = direPath[j];
+        if (file && file.isDirectory) {
+          sendFiles.value.push({
+            name: file.name,
+            path: file.path,
+            progress: 0,
+            processmessage: '',
+            size: file.size,
+            type: 'directory',
+            status: 'ready',
+            transferRate: 0,
+            isPaused: false,
+            isCancel: false,
+            isCompleted: false,
+            fileId: window.crypto.randomUUID(),
+          });
+        }
+      }
+    }
+  }
+}
+
 // 处理文件选择
 const handleFileSelect = (event: Event) => {
   const target = event.target as HTMLInputElement
@@ -173,6 +202,7 @@ const handleFileSelect = (event: Event) => {
             processmessage: '',
             size: file.size,
             status: 'ready',
+            type: 'file',
             transferRate: 0,
             isPaused: false,
             isCancel: false,
@@ -186,34 +216,62 @@ const handleFileSelect = (event: Event) => {
   }
 }
 
-const handleFileDrop = (event: DragEvent) => {
-  event.preventDefault();
+const handleFileDrop = async (event: DragEvent) => {
   console.log('File dropped');
   if (event.dataTransfer?.files) {
     // 处理拖拽的多个文件
-    for (let i = 0; i < event.dataTransfer.files.length; i++) {
-      const file = event.dataTransfer.files[i]
-      if (file) {
-        // 检查文件是否已经存在于列表中
-        const filePath = window.electronAPI.getPathForFile(file)
-        const existingFileIndex = sendFiles.value.findIndex(f => f.path === filePath)
-        if (existingFileIndex === -1) {
-          // 添加新文件到列表
+    let files = event.dataTransfer.files;
+    let res: string[] = [];
+    if (files.length > 0) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (file) {
+          // 检查文件是否已经存在于列表中
+          const filePath = window.electronAPI.getPathForFile(file);
+          const existingFileIndex = sendFiles.value.findIndex(f => f.path === filePath);
+          if (existingFileIndex === -1) {
+            res.push(filePath);
+          }
+        }
+      }
+      const fileStat = await window.electronAPI.getPathStat(res) as FileStats[];
+      for (let i = 0; i < fileStat.length; i++) {
+        const file = fileStat[i];
+        if (file && file.isFile) {
           sendFiles.value.push({
             name: file.name,
-            path: filePath,
+            path: file.path,
             progress: 0,
             processmessage: '',
             size: file.size,
             status: 'ready',
+            type: 'file',
             transferRate: 0,
             isPaused: false,
             isCancel: false,
             isCompleted: false,
-            fileId: window.crypto.randomUUID()
+            fileId: window.crypto.randomUUID(),
           })
+        } else {
+          if (file && file.isDirectory) {
+            sendFiles.value.push({
+              name: file.name,
+              path: file.path,
+              progress: 0,
+              processmessage: '',
+              size: file.size,
+              status: 'ready',
+              type: 'directory',
+              transferRate: 0,
+              isPaused: false,
+              isCancel: false,
+              isCompleted: false,
+              fileId: window.crypto.randomUUID(),
+            })
+          }
         }
       }
+
     }
     isFileSelected.value = true
   }
@@ -224,9 +282,9 @@ const handleFileDragOver = (event: DragEvent) => {
 }
 
 //发送单个文件
-const sendFile = async (index:number) => {
-  if(index >= 0 && sendFiles.value[index]){
-    await window.electronAPI.sendFile([{ filePath: sendFiles.value[index].path, fileId: sendFiles.value[index].fileId }]);
+const sendFile = async (index: number) => {
+  if (index >= 0 && sendFiles.value[index]) {
+    await window.electronAPI.sendFile([{ filePath: sendFiles.value[index].path, fileId: sendFiles.value[index].fileId,type:sendFiles.value[index].type }]);
   }
 }
 
@@ -243,8 +301,9 @@ const sendAllFiles = async () => {
     return
   }
 
-  let sendfiles = sendFiles.value.filter(file => file.status === 'ready').map(file => ({ filePath: file.path, fileId: file.fileId }));
-  await window.electronAPI.sendFile(sendfiles);
+  let sendfiles = sendFiles.value.filter(file => file.status === 'ready').map(file => ({ filePath: file.path, fileId: file.fileId ,type:file.type}));
+  // await window.electronAPI.sendFile(sendfiles);
+  console.log(sendfiles)
 
 }
 
@@ -474,7 +533,7 @@ onUnmounted(() => {
 .file-selector {
   border: 2px dashed var(--border-color);
   border-radius: 10px;
-  padding: 40px 20px;
+  padding: 10px 20px;
   text-align: center;
   cursor: pointer;
   transition: var(--transition);
@@ -504,20 +563,15 @@ onUnmounted(() => {
   margin-bottom: 10px;
 }
 
-.browse-btn {
-  background: var(--bg-button);
-  color: var(--text-light);
-  border: none;
-  padding: 10px 20px;
-  border-radius: 5px;
+
+.file-selector-text span {
+  color: var(--notification-info-border);
+  text-decoration: underline;
   cursor: pointer;
-  font-size: 14px;
-  transition: var(--transition);
+  text-decoration-color: var(--text-primary);
+  text-underline-offset: 5px;
 }
 
-.browse-btn:hover {
-  background: var(--bg-button-hover);
-}
 
 .selected-file {
   background: var(--bg-card);
@@ -644,6 +698,25 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   margin-top: 20px;
+  outline: 1px solid var(--border-color);
+}
+
+@media screen and (min-height: 761px) and (max-height: 839px) {
+  .transfer-list {
+    height: 300px;
+  }
+}
+
+@media screen and (min-height: 839px) and (max-height: 931px) {
+  .transfer-list {
+    height: 400px;
+  }
+}
+
+@media screen and (min-height: 931px) {
+  .transfer-list {
+    height: 500px;
+  }
 }
 
 .transfer-item {
@@ -676,6 +749,13 @@ onUnmounted(() => {
 .transfer-name {
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.transfer-name:hover {
+  text-decoration: underline;
+  color: var(--notification-info-border);
+  text-decoration-color: var(--text-primary);
+  text-underline-offset: 5px;
 }
 
 .transfer-size-rate {

@@ -10,6 +10,7 @@ export const i18n = createI18n({
     messages:{
         zh:{
             title:'文件传输器',
+            or:'或',
             home:{
                 welcome:'欢迎使用文件传输器！',
                 subtitle:'安全、快速地在设备间传输文件。支持大文件传输，操作简单便捷。',
@@ -41,7 +42,9 @@ export const i18n = createI18n({
                 connect:'连接',
                 connected:'已连接',
                 disconnect:'断开连接',
-                clickOrDrop:'点击选择文件或拖放文件到此处',
+                clickOrDrop:'将文件或文件夹拖住到此处',
+                uploadfile:'点击上传文件',
+                uploaddire:'点击上传文件夹',
                 browse:'浏览文件',
                 pause:'暂停',
                 resume:'恢复',

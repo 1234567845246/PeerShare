@@ -1,7 +1,7 @@
 // src\main\mainEntry.ts
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell } from 'electron'
-import { join } from 'path'
-import { existsSync } from 'fs'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, type OpenDialogOptions } from 'electron'
+import { join ,basename} from 'path'
+import { existsSync, lstatSync } from 'fs'
 import ProgressTracker from './progressTracker'
 import { FileTransferServer, FileTransferClient } from './fileTransferServer'
 import { type ServerTransferStatus, type ClientTransferStatus } from '../common/types'
@@ -120,7 +120,7 @@ class Application {
         });
 
         // 文件发送
-        ipcMain.handle('send-file', async (_, files: { filePath: string; fileId: string }[]) => {
+        ipcMain.handle('send-file', async (_, files: { filePath: string; fileId: string; type: 'file' | 'directory' }[]) => {
             try {
                 if (!this.fileClient) {
                     return { success: false, message: 'File client is not connected' };
@@ -144,8 +144,8 @@ class Application {
 
 
 
-
-                await this.fileClient.sendFile(files);
+                console.log(files);
+                // await this.fileClient.send(files);
             } catch (error: any) {
                 // 确保在发送失败时清理 fileClient
                 if (this.fileClient) {
@@ -349,26 +349,58 @@ class Application {
             }
         })
 
-        ipcMain.handle('choose-directory', async (_, title: string) => {
+        ipcMain.handle('choose-directory', async (_, title: string, multiple: boolean = false) => {
 
-            const result = await dialog.showOpenDialog(this.mainWindow!, {
+
+            let option: OpenDialogOptions = {
                 title,
                 defaultPath: settings.settingData.defaultDownloadPath || app.getPath('downloads'),
                 properties: ['openDirectory', 'createDirectory'],
-            });
+            };
+            if (multiple) {
+                option.properties?.push('multiSelections');
+            }
+            const result = await dialog.showOpenDialog(this.mainWindow!, option);
 
             if (!result.canceled && result.filePaths.length > 0) {
-                return result.filePaths[0];
+                return result.filePaths;
             }
             return null;
 
+        });
+
+        ipcMain.handle('get-path-stat', async (_, path: string[] | string) => {
+            if (Array.isArray(path)) {
+                return path.map(p => {
+                    let res = {
+                        path: p,
+                        name: basename(p),
+                        exists: existsSync(p),
+                        isFile: lstatSync(p).isFile(),
+                        isDirectory: lstatSync(p).isDirectory(),
+                        size: lstatSync(p).size,
+                    }
+                    return res;
+                });
+
+            }
+            else {
+                return {
+                    path: path,
+                    name: basename(path),
+                    exists: existsSync(path),
+                    isFile: lstatSync(path).isFile(),
+                    isDirectory: lstatSync(path).isDirectory(),
+                    size: lstatSync(path).size,
+                };
+            }
         });
 
     }
 
     private createmainWindow() {
         this.mainWindow = new BrowserWindow({
-            minHeight: 640,
+            minHeight: 800,
             minWidth: 800,
             width: 1000,
             height: 800,

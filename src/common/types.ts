@@ -85,8 +85,8 @@ export type ClientTransferStatus = {
 } | {
     type: 'transfer-close',
     fileId: string;
-    filePath: string;   
-    message:string;
+    filePath: string;
+    message: string;
 }
 
 
@@ -150,4 +150,13 @@ export interface OptionProps {
     description?: string;
     disabled?: boolean;
     default?: boolean
+}
+
+export interface FileStats {
+    exists: boolean;
+    isFile: boolean; 
+    isDirectory: boolean; 
+    size: number; 
+    path: string;
+    name: string;
 }

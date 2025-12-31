@@ -1,7 +1,12 @@
 import WebSocket, { WebSocketServer } from 'ws';
-import { createReadStream, statSync, createWriteStream, WriteStream, ReadStream, existsSync } from 'fs';
-import { join, basename, parse } from 'path';
+import { createReadStream, statSync, createWriteStream, WriteStream, ReadStream, existsSync, mkdirSync, readdirSync, lstatSync } from 'fs';
+import { join, basename, parse, dirname, relative } from 'path';
 import { type ClientTransferStatus, type ServerTransferStatus } from '../common/types';
+import { MessageCodec, MessageType, type FileStartMessage, type FileStartAckMessage, type FileChunkMessage, type FileChunkAckMessage, type FileEndMessage, type FilePauseMessage, type FilePauseAckMessage, type FileResumeMessage, type FileResumeAckMessage, type FileCancelMessage, type FileCancelAckMessage, type FileControlMessage, type FileMessage, type FolderStartMessage, type FolderStartAckMessage, type FolderEndMessage, type FolderEndAckMessage } from '../common/MessageCodec';
+import { randomUUID } from 'crypto';
+import type { IncomingMessage } from 'http';
+import { settings } from './settings';
+
 
 // 文件传输状态枚举
 enum FileTransferStatus {
@@ -14,13 +19,12 @@ enum FileTransferStatus {
 interface QueuedFile {
     filePath: string;
     fileId: string;
+    type: 'file' | 'directory';
     status: FileTransferStatus;
+    folderId?: string; // 所属文件夹ID，若存在则表示此项属于文件夹传输
+    folderRootPath?: string; // 文件夹根路径
+    relativePath?: string; // 相对于文件夹根目录的相对路径
 }
-import EventEmitter from 'events';
-import { MessageCodec, MessageType, type FileStartMessage, type FileStartAckMessage, type FileChunkMessage, type FileChunkAckMessage, type FileEndMessage, type FilePauseMessage, type FilePauseAckMessage, type FileResumeMessage, type FileResumeAckMessage, type FileCancelMessage, type FileCancelAckMessage, type FileControlMessage, type FileMessage } from '../common/MessageCodec';
-import { randomUUID } from 'crypto';
-import { settings } from './settings';
-import type { IncomingMessage } from 'http';
 
 function generateClientId(): string {
     return randomUUID();
@@ -39,27 +43,41 @@ interface FileInfos {
     receiveRate: number; // 添加接收速率
     isPaused: boolean; // 添加暂停状态
     lastChunkIndex: number; // 添加最后一个块索引，用于恢复传输
+    folderId?: string; // 所属文件夹ID
+    relativePath?: string; // 相对于文件夹根目录的相对路径
+}
+
+// 文件夹传输状态跟踪接口
+interface FolderTransferStatus {
+    folderId: string;
+    folderName: string;
+    totalFiles: number;
+    receivedFiles: number;
+    totalSize: number;
+    receivedSize: number;
+    startTime: number;
 }
 
 
 /* 消息协议由 MessageCodec 处理 */
 
-export class FileTransferServer extends EventEmitter {
+export class FileTransferServer  {
     private wss: WebSocketServer;
     private port: number;
     private clients: Set<WebSocket>;
     private clientIds: Map<WebSocket, string>; // 存储每个连接的客户端ID
     private fileStreams: Map<WebSocket, WriteStream>; // 存储每个连接的文件写入流
     private fileInfos: Map<WebSocket, FileInfos>; // 存储每个连接的文件信息
+    private folderStatus: Map<string, FolderTransferStatus>; // 文件夹传输状态跟踪
     private onProgressCallbacks: (status: ServerTransferStatus) => void; // 服务器连接的进度回调函数
 
     constructor(port: number = settings.settingData.defaultServerPort || 8080) {
-        super();
         this.port = port;
         this.clients = new Set();
         this.clientIds = new Map();
         this.fileStreams = new Map();
         this.fileInfos = new Map();
+        this.folderStatus = new Map();
         this.onProgressCallbacks = () => { };
         this.wss = new WebSocketServer({ port: this.port, perMessageDeflate: false, maxPayload: 100 * 1024 * 1024 });
         this.setupListeners();
@@ -194,7 +212,35 @@ export class FileTransferServer extends EventEmitter {
         console.log(`Starting to receive file: ${message.filename} (${message.fileSize} bytes)`);
 
         // 创建文件写入流
-        let filePath = join(settings.settingData.defaultDownloadPath || __dirname, message.filename);
+        // 如果存在相对路径，则使用相对路径；否则使用文件名
+        let filePath: string;
+        if (message.relativePath) {
+            // 文件夹传输的情况
+            filePath = join(settings.settingData.defaultDownloadPath || __dirname, message.relativePath);
+        } else {
+            // 单个文件传输的情况
+            filePath = join(settings.settingData.defaultDownloadPath || __dirname, message.filename);
+        }
+
+        // 创建文件夹结构
+        try {
+            const fileDir = dirname(filePath);
+            if (!existsSync(fileDir)) {
+                mkdirSync(fileDir, { recursive: true });
+                console.log(`Created directory: ${fileDir}`);
+            }
+        } catch (err) {
+            console.error('Failed to create directory:', err);
+            this.onProgressCallbacks({
+                type: 'transfer-error',
+                message: `创建文件夹失败: ${(err as any).message || '未知错误'}`,
+                clientId: this.clientIds.get(ws) || 'unknown',
+                fileId: message.fileId
+            });
+            return;
+        }
+
+        // 处理文件覆盖问题
         if (!settings.settingData.overwriteExistingFiles) {
             let uniqueFilePath = filePath;
             let count = 1;
@@ -203,9 +249,12 @@ export class FileTransferServer extends EventEmitter {
                 uniqueFilePath = join(parsedPath.dir, `${parsedPath.name}(${count})${parsedPath.ext}`);
                 count++;
             }
-            console.log(`File exists. Saving as: ${uniqueFilePath}`);
-            filePath = uniqueFilePath;
+            if (uniqueFilePath !== filePath) {
+                console.log(`File exists. Saving as: ${uniqueFilePath}`);
+                filePath = uniqueFilePath;
+            }
         }
+
         const writeStream = createWriteStream(filePath);
 
         this.fileStreams.set(ws, writeStream);
@@ -220,7 +269,8 @@ export class FileTransferServer extends EventEmitter {
             lastUpdateTime: Date.now(),
             receiveRate: 0,
             isPaused: false,
-            lastChunkIndex: -1
+            lastChunkIndex: -1,
+            relativePath: message.relativePath
         });
 
         console.log(`File stream created for ${message.filename}`);
@@ -571,6 +621,42 @@ export class FileTransferServer extends EventEmitter {
     }
 }
 
+/**
+ * 递归收集文件夹中的所有文件
+ * @param folderPath 文件夹路径
+ * @returns 文件数组，包含文件路径、相对路径等信息
+ */
+function collectFilesFromFolder(folderPath: string): Array<{ filePath: string; relativePath: string }> {
+    const files: Array<{ filePath: string; relativePath: string }> = [];
+
+    function traverse(currentPath: string, basePath: string) {
+        try {
+            const entries = readdirSync(currentPath);
+            for (const entry of entries) {
+                const fullPath = join(currentPath, entry);
+                const stat = lstatSync(fullPath);
+
+                if (stat.isDirectory()) {
+                    // 递归遍历子文件夹
+                    traverse(fullPath, basePath);
+                } else if (stat.isFile()) {
+                    // 计算相对路径
+                    const relativePath = relative(basePath, fullPath);
+                    files.push({
+                        filePath: fullPath,
+                        relativePath: relativePath
+                    });
+                }
+            }
+        } catch (err) {
+            console.error(`Error traversing folder ${currentPath}:`, err);
+        }
+    }
+
+    traverse(folderPath, folderPath);
+    return files;
+}
+
 export class FileTransferClient {
     private ws: WebSocket | null = null;
     private url: string;
@@ -735,7 +821,12 @@ export class FileTransferClient {
                 // 如果存在活动文件路径且当前没有正在发送，则从 lastChunkIndex+1 处继续发送
                 if (this.activeFileId !== null && !this.sendingInProgress) {
                     // 异步恢复发送，不阻塞消息处理
-                    let file = {'filePath': this.getfilePathFromId(this.activeFileId) as string, 'fileId': this.activeFileId}
+                    const queuedFile = this.fileQueue.find(f => f.fileId === this.activeFileId);
+                    let file = {
+                        'filePath': this.getfilePathFromId(this.activeFileId) as string, 
+                        'fileId': this.activeFileId,
+                        'relativePath': queuedFile?.relativePath
+                    }
                     this.sendFileFromOffset(file, this.lastChunkIndex + 1).catch(err => {
                         console.error('Error while resuming transfer:', err);
                         // 发送错误信息
@@ -812,15 +903,83 @@ export class FileTransferClient {
         }
     }
 
-    public async sendFile(files: { filePath: string; fileId: string }[]): Promise<void> {
-        // 将文件添加到传输队列，并设置初始状态为待处理
-        this.fileQueue = files.map(file => ({
-            ...file,
-            status: FileTransferStatus.Pending
-        }));
+    /**
+     * 统一发送文件和文件夹
+     * @param items 包含文件或文件夹的数组，type可以是'file'或'directory'
+     */
+    public async send(items: { filePath: string; fileId: string; type: 'file' | 'directory' }[]): Promise<void> {
+        // 处理文件夹类型，展开为文件列表并添加文件夹元数据
+        const expandedQueue: QueuedFile[] = [];
+        const folderInfo: Map<string, { name: string; files: QueuedFile[]; totalSize: number }> = new Map();
+
+        for (const item of items) {
+            if (item.type === 'directory') {
+                // 文件夹类型：收集文件并标记文件夹ID
+                const folderId = item.fileId;
+                const folderPath = item.filePath;
+                const folderName = basename(folderPath);
+
+                console.log(`Preparing to send folder: ${folderName} (ID: ${folderId})`);
+
+                const collectedFiles = collectFilesFromFolder(folderPath);
+
+                if (collectedFiles.length === 0) {
+                    console.warn(`Folder ${folderName} is empty`);
+                    if (this.onProgressCallbacks) {
+                        this.onProgressCallbacks({
+                            type: 'transfer-error',
+                            message: `文件夹${folderName}为空`,
+                            fileId: folderId,
+                            filePath: folderPath
+                        });
+                    }
+                    continue;
+                }
+
+                // 计算总大小
+                const totalSize = collectedFiles.reduce((sum, file) => {
+                    try {
+                        return sum + statSync(file.filePath).size;
+                    } catch {
+                        return sum;
+                    }
+                }, 0);
+
+                const folderFiles: QueuedFile[] = collectedFiles.map((file, index) => ({
+                    filePath: file.filePath,
+                    fileId: `${folderId}-file-${index}`,
+                    type: 'file' as const,
+                    status: FileTransferStatus.Pending,
+                    folderId: folderId,
+                    folderRootPath: folderPath,
+                    relativePath: file.relativePath
+                }));
+
+                expandedQueue.push(...folderFiles);
+                folderInfo.set(folderId, {
+                    name: folderName,
+                    files: folderFiles,
+                    totalSize: totalSize
+                });
+
+                console.log(`Found ${collectedFiles.length} files in folder ${folderName}`);
+            } else {
+                // 普通文件类型
+                expandedQueue.push({
+                    ...item,
+                    status: FileTransferStatus.Pending
+                });
+            }
+        }
+
+        // 更新队列
+        this.fileQueue = expandedQueue;
+
+        // 保存文件夹元数据供processFileQueue使用
+        (this as any).pendingFolderInfo = folderInfo;
 
         // 如果没有正在处理队列，则开始处理
-        if (!this.isProcessingQueue) {
+        if (!this.isProcessingQueue && this.fileQueue.length > 0) {
             this.isProcessingQueue = true;
             await this.processFileQueue();
         }
@@ -828,16 +987,48 @@ export class FileTransferClient {
 
     // 处理文件传输队列
     private async processFileQueue(): Promise<void> {
+        const pendingFolderInfo = (this as any).pendingFolderInfo as Map<string, any> || new Map();
+        const processedFolders = new Set<string>(); // 记录已处理的文件夹
+
         for (const queuedFile of this.fileQueue) {
             // 只处理未完成的文件
             if (queuedFile.status !== FileTransferStatus.Completed) {
+                const folderId = queuedFile.folderId;
+
+                // 如果是文件夹中的第一个文件，发送FOLDER_START
+                if (folderId && !processedFolders.has(folderId)) {
+                    processedFolders.add(folderId);
+                    const folderData = pendingFolderInfo.get(folderId);
+                    if (folderData) {
+                        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                            throw new Error('WebSocket is not connected');
+                        }
+
+                        const folderStartMsg: FolderStartMessage = {
+                            type: MessageType.FOLDER_START,
+                            folderId: folderId,
+                            folderName: folderData.name
+                        };
+
+                        this.ws.send(this.encodeMessage(folderStartMsg));
+                        console.log(`Sent FOLDER_START message for ${folderData.name}`);
+                    }
+                }
+
                 // 更新状态为正在传输
                 queuedFile.status = FileTransferStatus.InProgress;
-                
+
                 try {
                     // 从头开始发送文件（chunkIndex = 0）
-                    await this.sendFileFromOffset({filePath: queuedFile.filePath, fileId: queuedFile.fileId}, 0);
-                    
+                    await this.sendFileFromOffset(
+                        {
+                            filePath: queuedFile.filePath,
+                            fileId: queuedFile.fileId,
+                            relativePath: queuedFile.relativePath
+                        },
+                        0
+                    );
+
                     // 传输成功后更新状态为已完成
                     queuedFile.status = FileTransferStatus.Completed;
                 } catch (error: unknown) {
@@ -852,8 +1043,35 @@ export class FileTransferClient {
                         });
                     }
                 }
+
+                // 检查是否是文件夹中的最后一个文件，如果是则发送FOLDER_END
+                if (folderId) {
+                    const remainingFolderFiles = this.fileQueue.filter(
+                        f => f.folderId === folderId && f.status !== FileTransferStatus.Completed
+                    );
+
+                    if (remainingFolderFiles.length === 0) {
+                        const folderData = pendingFolderInfo.get(folderId);
+                        if (folderData && this.ws && this.ws.readyState === WebSocket.OPEN) {
+                            const folderEndMsg: FolderEndMessage = {
+                                type: MessageType.FOLDER_END,
+                                folderId: folderId,
+                                totalFiles: folderData.files.length,
+                                totalSize: folderData.totalSize
+                            };
+
+                            this.ws.send(this.encodeMessage(folderEndMsg));
+                            console.log(
+                                `Sent FOLDER_END message for ${folderData.name}, total files: ${folderData.files.length}, total size: ${folderData.totalSize} bytes`
+                            );
+                        }
+                    }
+                }
             }
         }
+
+        // 清理临时文件夹信息
+        (this as any).pendingFolderInfo = null;
 
         // 队列处理完成
         this.isProcessingQueue = false;
@@ -913,11 +1131,11 @@ export class FileTransferClient {
         return false; // 传输未被取消或暂停
     }
 
-    public async sendFileFromOffset(file:{filePath:string,fileId:string} ,startChunkIndex: number): Promise<void> {
+    public async sendFileFromOffset(file:{filePath:string,fileId:string,relativePath?:string} ,startChunkIndex: number): Promise<void> {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             throw new Error('WebSocket is not connected');
         }
-        let { filePath, fileId } = file;
+        let { filePath, fileId, relativePath } = file;
         const filename = basename(filePath);
         const fileSize = statSync(filePath).size;
 
@@ -944,7 +1162,8 @@ export class FileTransferClient {
                 type: MessageType.FILE_START,
                 filename: filename,
                 fileId: fileId,
-                fileSize: fileSize
+                fileSize: fileSize,
+                relativePath: relativePath // 添加相对路径
             };
 
             // 检查WebSocket连接状态
@@ -1277,6 +1496,7 @@ export class FileTransferClient {
         // 将所有文件添加到传输队列，并设置初始状态为待处理
         this.fileQueue = files.map(file => ({
             ...file,
+            type: 'file',
             status: FileTransferStatus.Pending
         }));
 
